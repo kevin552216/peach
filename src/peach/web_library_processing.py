@@ -59,33 +59,11 @@ def _control_action(contract, config, body):
     if job_id:
         control.select_job(str(job_id))
     if action == 'stop':
-        from .job_recovery import cancel
-        from .library_processing import _save, state_path
-        import time
-        control.request('stop', str(job_id))
-        thread = getattr(contract.library_processing_job, 'thread', None)
-        executing = bool(thread is not None and thread.is_alive()) or _writer_active(config)
-        cancel(contract.db_path, 'library-processing', finish_run=not executing)
-        if not executing:
-            result = {**previous, 'status': 'cancelled', 'stage': '已停止', 'error': '',
-                      'followups': [], 'waiting_for_update': False, 'completed_at': time.time()}
-            _save(state_path(config), result)
-            contract.library_processing_job.stop(timeout=0, resume=False)
-        return q_library_processing(contract, {})
+        return _stop_processing(contract, config, control, previous, str(job_id))
     if control.stopped and job_id:
         raise ValueError('任务正在停止，请等待结束后重新发起任务')
     if action == 'set_speed':
-        mode = valid_mode(body.get('speed_mode'))
-        control.request(action, mode=mode)
-        if previous.get('status') in ACTIVE:
-            ratio = mode_ratio(mode, previous.get('speed_mode') or 'standard')
-            fields = dict(speed_mode=mode, eta_initial=True)
-            if previous.get('speed_mode') != mode:
-                for key in ('eta_seconds_min', 'eta_seconds_max'):
-                    if isinstance(previous.get(key), (int, float)):
-                        fields[key] = max(0, int(previous[key] * ratio))
-            contract.library_processing_job.update(previous['job_id'], **fields)
-        return q_library_processing(contract, {})
+        return _set_processing_speed(contract, control, previous, body.get('speed_mode'))
     status = ('paused' if previous.get('status') == 'paused' else 'pausing') if action == 'pause' else 'running'
     _announce_control(contract.library_processing_job, str(job_id), status)
     control.request(action, str(job_id))
@@ -108,6 +86,38 @@ def _control_action(contract, config, body):
     if not live and result.get('status') in ACTIVE:
         result['status'] = status
     return result
+
+
+def _stop_processing(contract, config, control, previous, job_id):
+    """撤销恢复意图，在写入者退出后结算这一趟任务。"""
+    from .job_recovery import cancel
+    from .library_processing import _save, state_path
+    import time
+    control.request('stop', job_id)
+    thread = getattr(contract.library_processing_job, 'thread', None)
+    executing = bool(thread is not None and thread.is_alive()) or _writer_active(config)
+    cancel(contract.db_path, 'library-processing', finish_run=not executing)
+    if not executing:
+        result = {**previous, 'status': 'cancelled', 'stage': '已停止', 'error': '',
+                  'followups': [], 'waiting_for_update': False, 'completed_at': time.time()}
+        _save(state_path(config), result)
+        contract.library_processing_job.stop(timeout=0, resume=False)
+    return q_library_processing(contract, {})
+
+
+def _set_processing_speed(contract, control, previous, value):
+    """保存处理强度，并按模式比例调整当前任务的耗时范围。"""
+    mode = valid_mode(value)
+    control.request('set_speed', mode=mode)
+    if previous.get('status') in ACTIVE:
+        ratio = mode_ratio(mode, previous.get('speed_mode') or 'standard')
+        fields = dict(speed_mode=mode, eta_initial=True)
+        if previous.get('speed_mode') != mode:
+            for key in ('eta_seconds_min', 'eta_seconds_max'):
+                if isinstance(previous.get(key), (int, float)):
+                    fields[key] = max(0, int(previous[key] * ratio))
+        contract.library_processing_job.update(previous['job_id'], **fields)
+    return q_library_processing(contract, {})
 
 
 def _announce_control(job, job_id, status):

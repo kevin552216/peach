@@ -1,6 +1,8 @@
 ﻿param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\dist\Peach'),
     [switch]$Standalone,
+    # 本机覆盖更新只编应用，沿用安装目录里的媒体工具。
+    [switch]$ApplicationOnly,
     # 在独立目录包之上再编一个 Inno Setup 安装包，放在输出目录的上一层。
     [switch]$Installer,
     [string]$CloudflaredPath = '',
@@ -9,7 +11,7 @@
 )
 
 $ErrorActionPreference = 'Stop'
-if ($Installer) { $Standalone = $true }
+if ($Installer -or $ApplicationOnly) { $Standalone = $true }
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $Python)) {
@@ -96,7 +98,7 @@ if ($Standalone) {
 $CloudflaredSource = $null
 $CloudflaredManifest = $null
 $CloudflaredHash = $null
-if ($Standalone) {
+if ($Standalone -and -not $ApplicationOnly) {
     if (-not $FFmpegPath) { $FFmpegPath = $env:PEACH_FFMPEG_BUILD }
     if (-not $FFmpegPath) { $FFmpegPath = Join-Path $ProjectRoot 'build\ffmpeg-windows\ffmpeg' }
     & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --source $FFmpegPath --validate-only
@@ -147,23 +149,25 @@ if ($LASTEXITCODE -ne 0) { throw 'Peach build failed.' }
 if ($Standalone) {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'docs/TESTING_DESKTOP.md') -Destination (Join-Path $OutputPath '开始使用.md')
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'LICENSE') -Destination (Join-Path $OutputPath 'LICENSE.txt')
-    Copy-Item -LiteralPath $CloudflaredSource -Destination (Join-Path $OutputPath 'cloudflared.exe') -Force
-    $CloudflaredManifest | Add-Member -NotePropertyName packaged_sha256 -NotePropertyValue $CloudflaredHash -Force
-    $CloudflaredManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputPath 'cloudflared-manifest.json') -Encoding utf8
-    $PackagedFFmpeg = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\ffmpeg'))
-    if (-not $PackagedFFmpeg.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'FFmpeg packaging destination must stay inside the application output directory.'
+    if (-not $ApplicationOnly) {
+        Copy-Item -LiteralPath $CloudflaredSource -Destination (Join-Path $OutputPath 'cloudflared.exe') -Force
+        $CloudflaredManifest | Add-Member -NotePropertyName packaged_sha256 -NotePropertyValue $CloudflaredHash -Force
+        $CloudflaredManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputPath 'cloudflared-manifest.json') -Encoding utf8
+        $PackagedFFmpeg = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\ffmpeg'))
+        if (-not $PackagedFFmpeg.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'FFmpeg packaging destination must stay inside the application output directory.'
+        }
+        if (Test-Path -LiteralPath $PackagedFFmpeg) { Remove-Item -LiteralPath $PackagedFFmpeg -Recurse -Force }
+        & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --source $FFmpegPath --destination $PackagedFFmpeg
+        if ($LASTEXITCODE -ne 0) { throw 'FFmpeg packaging failed.' }
+        $PackagedUntrunc = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\untrunc'))
+        if (-not $PackagedUntrunc.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'untrunc packaging destination must stay inside the application output directory.'
+        }
+        if (Test-Path -LiteralPath $PackagedUntrunc) { Remove-Item -LiteralPath $PackagedUntrunc -Recurse -Force }
+        & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --tool untrunc --source $UntruncPath --destination $PackagedUntrunc
+        if ($LASTEXITCODE -ne 0) { throw 'untrunc packaging failed.' }
     }
-    if (Test-Path -LiteralPath $PackagedFFmpeg) { Remove-Item -LiteralPath $PackagedFFmpeg -Recurse -Force }
-    & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --source $FFmpegPath --destination $PackagedFFmpeg
-    if ($LASTEXITCODE -ne 0) { throw 'FFmpeg packaging failed.' }
-    $PackagedUntrunc = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\untrunc'))
-    if (-not $PackagedUntrunc.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'untrunc packaging destination must stay inside the application output directory.'
-    }
-    if (Test-Path -LiteralPath $PackagedUntrunc) { Remove-Item -LiteralPath $PackagedUntrunc -Recurse -Force }
-    & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --tool untrunc --source $UntruncPath --destination $PackagedUntrunc
-    if ($LASTEXITCODE -ne 0) { throw 'untrunc packaging failed.' }
 }
 
 # 工作目录只服务这一次构建：`--clean` 已让下一次不复用它，留着只是几十 MB 的中间产物。

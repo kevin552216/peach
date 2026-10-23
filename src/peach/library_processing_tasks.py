@@ -12,6 +12,7 @@ from pathlib import Path
 from filelock import FileLock
 
 from . import library_processing as engine
+from .filename_rules import Engine, load as load_filename_rules
 from .jobs import DiskGuard, JobPaused
 from .media_processing_policy import metadata_only
 from .processing_control import (ProcessingStopped, bind_control, checkpoint, initial_estimate,
@@ -86,7 +87,8 @@ class SelectedProcessing:
         self.errors = []
         self.rows, self.roots = [], []
         self.covered = []
-        self.directory_index = engine._DirectoryIndex()
+        rules = Engine(load_filename_rules(config.directory('state')))
+        self.directory_index = engine._DirectoryIndex(rules.code, rules.fingerprint)
         self.locations = config.locations if options.get('location', 'configured') == 'configured' else {
             options['location']: config.locations[options['location']]}
         self.state = self.initial_state()
@@ -333,7 +335,7 @@ class SelectedProcessing:
         rows = self.current_rows()
         for row in rows:
             self.update(current_asset_id=row['id'], current_asset_name=row['name'])
-            code = engine._provider_code(row['code']) or engine.release_code_from_filename(row['name'])
+            code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             video = engine.translate_ledger_path(row['path'])
             _, posters = listing.sidecars(video)
             poster_root = self.cover_root if code else self.config.directory('generated') / 'posters'
@@ -342,7 +344,7 @@ class SelectedProcessing:
         engine._read_local_posters(jobs, self.state, update=self.update, issue=self.issue)
         for index, row in enumerate(rows):
             self.update(stage='补全封面', checked=index, total=len(rows))
-            code = engine._provider_code(row['code']) or engine.release_code_from_filename(row['name'])
+            code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             _, covers = self.get_remote().collect(row, code, [], self.cover_root, update=self.update, issue=self.issue)
             self.covered.append((row['id'], covers))
             self.publish(covers=self.state['covers'] + covers, checked=index + 1)
@@ -362,7 +364,7 @@ class SelectedProcessing:
             return rows
         seen, chosen, deferred = set(), [], []
         for row in rows:
-            code = engine._provider_code(row['code']) or engine.release_code_from_filename(row['name'])
+            code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             duration, size = row.get('duration'), row.get('size')
             key = (code, size, round(duration, 1)) if code and size and duration and duration > 0 else None
             if key is not None and key in seen and not self.has_preview(row):

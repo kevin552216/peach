@@ -24,6 +24,10 @@ export interface LibraryProcessingIssue {
 
 /** 一趟扫描与采集的快照。字段以 `q_library_processing`（`src/peach/web_library_processing.py`）为准。 */
 export interface LibraryProcessingData {
+  requested_tasks?: ProcessingTask[];
+  execution_mode?: 'sequential' | 'parallel';
+  defer_suspected_duplicates?: boolean;
+  work_progress?: Partial<Record<ProcessingTask, { status: string; done: number; total: number; failed: number; deferred: number }>>;
   metadata_only?: boolean;
   /** `idle` | `running` | `pausing` | `paused` | `stopping` | `cancelled` | `complete` | `failed`。 */
   status: string;
@@ -41,6 +45,7 @@ export interface LibraryProcessingData {
   total?: number;
   scanned?: number;
   scanned_bytes?: number;
+  probed?: number;
   identified?: number;
   candidates?: number;
   auto_applied?: number;
@@ -72,8 +77,12 @@ export interface LibraryProcessingData {
 
 /** 一次写操作的请求体：指定处理阶段与影片，或者按任务号重试失败项。 */
 export type ProcessingSpeed = 'low' | 'standard' | 'high';
+export type ProcessingTask = 'scan' | 'probe' | 'metadata' | 'covers' | 'previews';
 export interface LibraryProcessingCommand {
-  stage?: 'scan' | 'collect' | 'previews' | 'metadata';
+  stage?: 'scan' | 'collect' | 'previews' | 'metadata' | 'probe' | 'covers';
+  tasks?: ProcessingTask[];
+  execution_mode?: 'sequential' | 'parallel';
+  defer_suspected_duplicates?: boolean;
   asset_ids?: number[];
   job_id?: string;
   retry?: number[];
@@ -211,6 +220,20 @@ export function issueDetails(state: LibraryProcessingData): IssueDetails | null 
 const ANNOUNCED_KEY = 'peach.library-processing.announced';
 const FRESH_COMPLETION_SECONDS = 120;
 
+export function processingResultText(state: LibraryProcessingData): string {
+  const tasks = state.requested_tasks;
+  if (!tasks?.length) return '';
+  const parts = [];
+  if (tasks.includes('scan')) parts.push(`已扫描 ${state.scanned || 0} 个文件`);
+  if (tasks.includes('probe')) parts.push(`读取 ${state.probed || 0} 部视频属性`);
+  if (tasks.includes('metadata')) parts.push(`整理 ${state.candidates || 0} 组资料结果，自动保存 ${state.auto_applied || 0} 条`);
+  if (tasks.includes('covers')) parts.push(`取得 ${state.covers || 0} 张封面`);
+  if (tasks.includes('previews')) parts.push(`生成 ${state.previews || 0} 部视频预览`);
+  const deferred = Object.values(state.work_progress || {}).reduce((count, task) => count + (task?.deferred || 0), 0);
+  if (deferred) parts.push(`待确认预览 ${deferred} 项`);
+  return parts.join('，') + '。';
+}
+
 export function freshProcessingResult(state: LibraryProcessingData): boolean {
   const age = state.completed_at == null ? Infinity : Date.now() / 1000 - state.completed_at;
   return !!state.job_id && age >= 0 && age < FRESH_COMPLETION_SECONDS;
@@ -228,6 +251,10 @@ export function announceCompletion(
   } catch { /* 存储不可用时照常提示，最多重复一次 */ }
   if (state.status === 'cancelled') {
     toast('已停止扫描与采集，已保留处理结果');
+    return;
+  } else if (state.requested_tasks?.length) {
+    toast(processingResultText(state));
+    return;
   } else if (state.requested_stage === 'previews') {
     toast(`视频预览已生成：${state.previews || 0} 部`);
     return;

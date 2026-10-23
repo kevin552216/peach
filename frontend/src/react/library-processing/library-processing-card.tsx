@@ -24,12 +24,12 @@ import { Disclosure } from '../settings/section';
 import { queryClient } from '../query';
 import {
   DISCONNECTED_TEXT, issueDetails, LIBRARY_PROCESSING_KEY, LIBRARY_PROCESSING_URL,
-  notesLine, processingActive, remainingTime, type LibraryProcessingCommand, type LibraryProcessingData,
+  notesLine, processingActive, processingResultText, remainingTime, type LibraryProcessingCommand, type LibraryProcessingData,
 } from './library-processing';
 import { useLibraryProcessingJob } from './use-library-processing';
 import { ProcessingActions } from './processing-actions';
 import { ProcessingControls } from './processing-controls';
-import { ProcessingProgress } from './processing-line';
+import { ProcessingProgress, WorkProgress } from './processing-line';
 
 /* 中文正文写成常量：JSX 里换行的文字会在接缝处多出一个空格，中文句子里看得见。
    卡片正文与首屏骨架共用 `SCAN_CARD_TEXT`（`management.ts`）。 */
@@ -49,7 +49,8 @@ const profileText = (state: LibraryProcessingData) => {
 };
 
 const receiptText = (state: LibraryProcessingData) =>
-  state.requested_stage === 'previews' ? `已生成 ${state.previews || 0} 部视频预览。`
+  state.requested_tasks?.length ? processingResultText(state)
+  : state.requested_stage === 'previews' ? `已生成 ${state.previews || 0} 部视频预览。`
   : `已扫描 ${state.scanned || 0} 个文件，识别 ${state.identified || 0} 个番号，`
   + `整理 ${state.candidates || 0} 组资料结果，自动保存 ${state.auto_applied || 0} 条。`
   + (state.previews ? `已生成 ${state.previews} 部视频预览。` : '')
@@ -66,6 +67,7 @@ function Outcome(
   const details = issueDetails(state);
   const retryable = state.status === 'failed' && !!state.retryable_asset_ids?.length;
   const notes = notesLine(state.notes || {});
+  const deferred = Object.values(settled?.work_progress || {}).reduce((count, task) => count + (task?.deferred || 0), 0);
   /* 清单是这一页唯一自己滚的块，原生滚动条在这儿就是一条系统灰柱子。 */
   const list = useOverlayScrollbar<HTMLUListElement>();
   return (
@@ -117,11 +119,14 @@ function Outcome(
           </Note>
         : null}
       {settled?.status === 'cancelled'
-        ? <Note tone="neutral" title="已停止扫描与采集">已保留处理结果，重新开始时可选择处理范围。</Note>
+        ? <Note tone="neutral" title="已停止扫描与采集">已保留处理结果，可以选择工作项目并派发新任务。</Note>
         : null}
       {settled?.status === 'complete'
         ? <Note tone="success" title="处理完成">{receiptText(settled)}</Note>
         : null}
+      {deferred > 0 ? <Note tone="neutral" title={`待确认预览 ${deferred} 项`}>
+        可关闭「暂缓疑似重复项的预览」后派发新任务，处理这些项目。
+      </Note> : null}
       {!processingActive(state) && notes
         ? <Note tone="neutral"
             extra={state.issues_log
@@ -178,9 +183,7 @@ export function LibraryProcessingCard(props: LibraryProcessingProps) {
           {state.candidates
             ? <LinkButton href="/review" size="small" trailingIcon={RiArrowRightLine}>复核资料</LinkButton>
             : null}
-          {/* 两个入口并存，各自答的不是一个问题：这里是「重新跑一整批」，下面那条错误提示里
-              的「重试未完成项」只补上一趟没做完的那些。采集里网络超时几乎每趟都留下几项可
-              重试的，页脚要是让位给重试键，新入库的片子就再也没有入口被扫到。 */}
+          {/* 新任务可选择工作项目与范围；失败重试沿用原任务的未完成集合。 */}
           <ProcessingActions scan busy={busy} metadataOnly={state?.metadata_only} speedMode={state.speed_mode} onRun={run} />
         </>
       }>
@@ -195,6 +198,7 @@ export function LibraryProcessingCard(props: LibraryProcessingProps) {
           {processingActive(state) ? <p className="text-body-2-regular text-text-secondary tabular-nums" data-processing-eta="">
             {remainingTime(state)}
           </p> : null}
+          {processingActive(state) ? <WorkProgress state={state} /> : null}
           <ProcessingControls state={state} disabled={start.isPending || job.isError} />
         </div>
       </Fieldset>

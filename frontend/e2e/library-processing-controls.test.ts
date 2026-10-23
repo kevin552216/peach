@@ -83,14 +83,14 @@ describe('扫描与采集控制', () => {
         await card.waitFor();
         await settle(page);
         await card.getByRole('button', { name: '同步媒体库', exact: true }).click();
-        const dialog = page.getByRole('dialog', { name: '同步媒体库', exact: true });
+        const dialog = page.getByRole('dialog', { name: '新任务', exact: true });
         await dialog.waitFor();
         assert.match(await dialog.innerText(), /可能让电脑变慢/);
         assert.equal(writes.length, 0);
         const modalLayout = await layout(page);
         assert.ok(modalLayout.scrollWidth <= modalLayout.viewportWidth, JSON.stringify(modalLayout));
         assert.deepEqual(modalLayout.offenders, []);
-        const optionFits = await dialog.locator('label').evaluateAll(labels => labels.every(label => {
+        const optionFits = await dialog.locator('.iconswitch label').evaluateAll(labels => labels.every(label => {
           const text = label.querySelector('span[aria-hidden="true"]')!.getBoundingClientRect();
           const box = label.getBoundingClientRect();
           return text.top >= box.top && text.bottom <= box.bottom && text.right <= box.right;
@@ -98,7 +98,7 @@ describe('扫描与采集控制', () => {
         assert.equal(optionFits, true, '处理模式文字应保持单行并落在控件内');
         await dialog.screenshot({ path: path.join(artifacts, `${viewport.name}-startup.png`) });
         await dialog.getByRole('radio', { name: '低占用', exact: true }).check();
-        await dialog.getByRole('button', { name: '同步媒体库', exact: true }).click();
+        await dialog.getByRole('button', { name: '开始任务', exact: true }).click();
         await card.getByText('预计剩余约 20–40 分钟（粗估）', { exact: true }).waitFor();
         assert.equal(writes[0]?.speed_mode, 'low');
         const dock = page.locator('#toasts [data-processing-dock]');

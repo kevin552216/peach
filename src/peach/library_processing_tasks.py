@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import threading
+from threading import local
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -83,7 +84,7 @@ class SelectedProcessing:
         self.mode = options.get('speed_mode') or (self.control.mode if self.control else 'standard')
         self.lock = threading.RLock()
         self.cancel = threading.Event()
-        self.local = threading.local()
+        self.local = local()
         self.errors = []
         self.rows, self.roots = [], []
         self.covered = []

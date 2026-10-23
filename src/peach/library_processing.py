@@ -44,7 +44,7 @@ from .strm import skip_background_read
 from .record_rehome import reattach_in
 from .processing_control import (task_control, bind_control, checkpoint_values,
                                  initial_estimate, ProcessingEstimate, interrupted_state,
-                                 deadline_after, resume_fields)
+                                 deadline_after, resume_fields, ProcessingStopped)
 
 FIELDS = ('item_key', 'code', 'query', 'asset_id', 'asset_path', 'field', 'field_label', 'current_value',
           'candidates_json', 'source_count', 'source_profile', 'policy_version', 'status',
@@ -810,15 +810,19 @@ def snapshot(config):
         state = json.loads(state_path(config).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {'status': 'idle'}
-    if state.get('status') == 'running':
+    from .processing_control import user_stopped
+    stopped = user_stopped(config.directory('database') / 'ledger.db', state.get('job_id'))
+    if state.get('status') in ('running', 'stopping') or (stopped and state.get('status') in ('paused', 'pausing')):
         try:
             # 锁覆盖 CLI 与 HTTP；进程退出后系统会释放它。
             with FileLock(str(state_path(config)) + '.lock', timeout=0):
                 state = json.loads(state_path(config).read_text(encoding='utf-8'))
-                if state.get('status') == 'running':
+                if state.get('status') in ('running', 'stopping', 'paused', 'pausing'):
                     # 拿得到锁说明写入者已经不在了。结论写回文件：只改副本的话，另一个读取者
                     # 正好短暂占着锁时会读到原样的「运行中」，界面就在两种状态之间来回跳。
-                    state.update(status='failed', error='处理被中断，可重试未完成的部分。',
+                    state.update(status='cancelled' if stopped else 'failed',
+                                 stage='已停止' if stopped else state.get('stage', ''),
+                                 error='' if stopped else '处理被中断，可重试未完成的部分。',
                                  completed_at=state.get('last_progress_at') or time.time())
                     _save(state_path(config), state)
         except Timeout:
@@ -2314,12 +2318,12 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             """阶段成功返回后发布完成状态；异常退出的阶段保留当前状态。"""
             update(steps=_complete_processing_step(state['steps'], key))
 
-        update()
         remote = _RemoteSession(config, provider_factory, _MissCache(misses_path(config)),
                                 retrying=retrying, routes=routes)
         flush_candidates = lambda force=False: None
 
         try:
+            update()
             guard = DiskGuard(config.data_root, 1)
             guard.check(force=True)
             locations = config.locations if location == 'configured' else {location: config.locations[location]}
@@ -2469,10 +2473,19 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                    error=issue_summary(state['issue_count'], state['paused_count']),
                    completed_at=time.time(), current_asset_id=None, current_asset_name='',
                    current_action='', current_started_at=None, current_deadline_at=None)
+        except ProcessingStopped:
+            state.update(status='cancelled', stage='已停止', error='', followups=[],
+                         completed_at=time.time(), current_action='',
+                         current_started_at=None, current_deadline_at=None)
+            _save(path, state)
+            report(dict(state))
         except Exception:
             state.update(status='failed', error='处理被中断。核对媒体目录后重试。', completed_at=time.time())
             state.update(interrupted_state(control))
             _save(path, state)
+            if state['status'] == 'cancelled':
+                report(dict(state))
+                return state
             raise
         finally:
             # 被打断也把已经攒下的候选写全：文件里要么是上一份完整的，要么是这一份完整的。

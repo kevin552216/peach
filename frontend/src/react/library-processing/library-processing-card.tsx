@@ -116,6 +116,9 @@ function Outcome(
             {problem || state.error || '处理未完成，请重试'}
           </Note>
         : null}
+      {settled?.status === 'cancelled'
+        ? <Note tone="neutral" title="已停止扫描与采集">已保留处理结果，重新开始时可选择处理范围。</Note>
+        : null}
       {settled?.status === 'complete'
         ? <Note tone="success" title="处理完成">{receiptText(settled)}</Note>
         : null}

@@ -7,12 +7,12 @@ from .library_processing import (ALL_STAGES, COLLECT_STAGE, SCAN_STAGE, STAGES,
                                 decorate, issues_path, process_library, snapshot)
 from .processing_control import control_for, initial_estimate, valid_mode, mode_ratio
 
-ACTIVE = ('running', 'pausing', 'paused')
+ACTIVE = ('running', 'pausing', 'paused', 'stopping')
 
 
 def _current(contract):
     live = contract.library_processing_job.snapshot()
-    return live if live and live.get('status') in ACTIVE else snapshot(settings_file.active())
+    return live if live and live.get('status') in (*ACTIVE, 'cancelled') else snapshot(settings_file.active())
 
 
 def q_library_processing(contract, _args):
@@ -20,6 +20,8 @@ def q_library_processing(contract, _args):
     control = control_for(settings_file.active())
     control.refresh(force=True)
     state['speed_mode'] = control.mode
+    if state.get('job_id') == control.job_id and control.stopped and state.get('status') in ACTIVE:
+        state['status'] = 'stopping'
     from .media_processing_policy import metadata_only
     state['metadata_only'] = metadata_only(settings_file.active().directory('state'))
     from .job_recovery import read
@@ -37,7 +39,7 @@ def q_library_processing(contract, _args):
 
 def _control_action(contract, config, body):
     action = body['action']
-    if action not in ('pause', 'resume', 'set_speed'):
+    if action not in ('pause', 'resume', 'stop', 'set_speed'):
         raise ValueError('处理动作无效')
     previous = _current(contract)
     job_id = body.get('job_id')
@@ -46,11 +48,27 @@ def _control_action(contract, config, body):
     if job_id and str(job_id) != str(previous.get('job_id') or ''):
         raise ValueError('任务已变化，请刷新页面后重试')
     if action != 'set_speed' and previous.get('status') not in ACTIVE:
-        raise ValueError('当前没有可暂停或继续的任务')
+        raise ValueError('当前没有可控制的任务')
     control = control_for(config)
     control.refresh(force=True)
     if job_id:
         control.select_job(str(job_id))
+    if action == 'stop':
+        from .job_recovery import cancel
+        from .library_processing import _save, state_path
+        import time
+        control.request('stop', str(job_id))
+        thread = getattr(contract.library_processing_job, 'thread', None)
+        executing = bool(thread is not None and thread.is_alive()) or _writer_active(config)
+        cancel(contract.db_path, 'library-processing', finish_run=not executing)
+        if not executing:
+            result = {**previous, 'status': 'cancelled', 'stage': '已停止', 'error': '',
+                      'followups': [], 'waiting_for_update': False, 'completed_at': time.time()}
+            _save(state_path(config), result)
+            contract.library_processing_job.stop(timeout=0, resume=False)
+        return q_library_processing(contract, {})
+    if control.stopped and job_id:
+        raise ValueError('任务正在停止，请等待结束后重新发起任务')
     if action == 'set_speed':
         mode = valid_mode(body.get('speed_mode'))
         control.request(action, mode=mode)

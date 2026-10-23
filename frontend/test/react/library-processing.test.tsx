@@ -7,6 +7,7 @@
 import { act } from 'react';
 import { notifyManager, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import * as legacyUi from '@peach/legacy/ui';
 
 import { queryClient } from '../../src/react/query';
 import {
@@ -74,6 +75,25 @@ const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync
 
 const menuItem = (label: string) =>
   [...document.querySelectorAll('[role="dialog"] button')].find((item) => item.textContent?.trim() === label);
+
+it('停止需要确认并按任务号提交，安全停点结束前保留忙态', async () => {
+  const paused = { status: 'paused', job_id: 'stop-one', checked: 3, total: 10 };
+  const served = await open(paused, () => ({ ...paused, status: 'stopping' }));
+  const host = await mount(card({ toast: vi.fn() }));
+  const confirmation = vi.spyOn(legacyUi, 'confirmModal');
+  confirmation.mockResolvedValueOnce({ confirmed: false });
+  await click(buttonNamed('停止任务', host));
+  expect(served.posts()).toEqual([]);
+  confirmation.mockImplementationOnce((async (options: Parameters<typeof legacyUi.confirmModal>[0]) => {
+    await options.onConfirm?.();
+    return { confirmed: true };
+  }) as typeof legacyUi.confirmModal);
+  await click(buttonNamed('停止任务', host));
+  expect(served.posts()).toEqual([{ action: 'stop', job_id: 'stop-one' }]);
+  expect(buttonNamed('正在停止', host)?.disabled).toBe(true);
+  expect(host.textContent).toContain('正在停止，等待当前步骤结束');
+  expect(confirmation).toHaveBeenCalledWith(expect.objectContaining({ title: '停止扫描与采集', confirmLabel: '停止任务' }));
+});
 
 it('来源说没有只报一个数，不算问题也不提供失败重试', async () => {
   await open({

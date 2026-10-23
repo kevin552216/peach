@@ -16,12 +16,18 @@ CURRENT = ContextVar('peach_library_processing_control', default=None)
 _CONTROLS = {}
 _LOCK = threading.Lock()
 MODES = ('low', 'standard', 'high')
+
+
 MODE_FACTORS = {'low': 1.8, 'standard': 1.0, 'high': 0.75}
 IO_INTERVALS = {
     'low': {'scan': 0.008, 'probe': 0.75, 'network': 1.5, 'frame': 0.75, 'work': 0.15},
     'standard': {'scan': 0.002, 'probe': 0.2, 'network': 0.25, 'frame': 0.2, 'work': 0.03},
     'high': {},
 }
+
+
+class ProcessingStopped(InterruptedError):
+    """用户要求在安全停点结束这一趟处理。"""
 
 
 def valid_mode(value):
@@ -64,6 +70,8 @@ def checkpoint_values(values):
 
 
 def interrupted_state(control):
+    if control is not None and control.stopped:
+        return dict(status='cancelled', stage='已停止', error='', completed_at=time.time(), followups=[])
     return dict(status='paused', error='', completed_at=None) if control is not None and control.paused else {}
 
 
@@ -147,6 +155,7 @@ class ProcessingControl:
         self.mode = data.get('speed_mode') if data.get('speed_mode') in MODES else 'standard'
         self.job_id = data.get('job_id')
         self.paused = data.get('paused') is True
+        self.stopped = data.get('stopped') is True
         self.event = threading.Event()
         self.event.set()
         self.publish = None
@@ -166,6 +175,7 @@ class ProcessingControl:
             if data.get('job_id') == self.job_id or self.publish is None:
                 self.job_id = data.get('job_id', self.job_id)
                 self.paused = data.get('paused', self.paused)
+                self.stopped = data.get('stopped', self.stopped)
                 mode = data.get('speed_mode', self.mode)
                 if mode in MODES and self.mode != mode:
                     self.mode = mode
@@ -173,7 +183,7 @@ class ProcessingControl:
 
     def _save(self):
         atomic_write_text(self.path, json.dumps(dict(
-            speed_mode=self.mode, job_id=self.job_id, paused=self.paused)) + '\n')
+            speed_mode=self.mode, job_id=self.job_id, paused=self.paused, stopped=self.stopped)) + '\n')
 
     def request(self, action, job_id=None, mode=None):
         with self.lock:
@@ -182,6 +192,10 @@ class ProcessingControl:
             if action == 'set_speed':
                 self.mode = valid_mode(mode)
                 self.next_work.clear()
+            elif action == 'stop':
+                self.stopped, self.paused = True, False
+            elif self.stopped:
+                raise ValueError('任务已停止，请重新发起任务')
             else:
                 self.paused = action == 'pause'
             self._save()
@@ -192,6 +206,7 @@ class ProcessingControl:
         with self.lock:
             if self.job_id != job_id:
                 self.job_id, self.paused, self.paused_seconds = job_id, False, 0.0
+                self.stopped = False
 
     @contextmanager
     def bind(self, job_id, *, publish, active, db_path, mode=None):
@@ -213,8 +228,10 @@ class ProcessingControl:
         from .update_tasks import check_pause
         started = None
         while True:
-            check_pause(self.db_path)
             self.refresh()
+            if self.stopped:
+                raise ProcessingStopped('用户停止任务')
+            check_pause(self.db_path)
             if not self.active():
                 raise InterruptedError('处理任务已停止')
             with self.lock:
@@ -245,6 +262,12 @@ def user_paused(db_path, job_id):
     from .update_tasks import state_for
     data = _read(state_for(db_path).parent / 'library-processing-control.json')
     return data.get('job_id') == job_id and data.get('paused') is True
+
+
+def user_stopped(db_path, job_id):
+    from .update_tasks import state_for
+    data = _read(state_for(db_path).parent / 'library-processing-control.json')
+    return data.get('job_id') == job_id and data.get('stopped') is True
 
 
 def initial_estimate(config, db_path, stage, asset_ids=None, mode=None):

@@ -13,6 +13,9 @@
 ## FC2 文件名番号
 
 内置文件名解析复用 `catalog_rules` 的 FC2 商品号形态、推广标记清理与规范化函数，以及 Python 3.14 标准库 `re`。Peach 的领域规则允许开头的排序加号、`[JAV]`、`[Uncensored]` 标签，以及商品号后的片名与分卷；正文中提及的 FC2 号码不作为文件身份。完整番号字段与来源查询仍使用严格的整串匹配。短写法与历史提交 `280f4350999ed49f3df938012dc6f6f9b7be698f` 共用同一商品号规则。隔离测试覆盖标题、标签、分卷、不完整号码与本地登记后进入 FC2 来源链的行为。
+## 扫描与采集的用户停止
+
+复用现有 `ProcessingControl`、`threading.Event`、任务恢复记录与 `TaskRunStore`，停止意图按任务号持久保存，并在既有安全停点检查。Python 3.14 标准库的协作取消适用于已运行线程；[`Future.cancel()`](https://docs.python.org/3.14/library/concurrent.futures.html#concurrent.futures.Future.cancel) 只处理未开始的调用，不能覆盖这里的扫描、请求与 CLI 共用状态，因此不另建执行器。用户停止立即清除恢复请求，工作者退出前保持互斥，终态为 `cancelled`，已保存结果保留。页面复用共享 `ProcessingControls` 与 `confirmModal()`；无新增依赖。
 
 ## 检查输入与源码文案
 

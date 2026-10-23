@@ -6,6 +6,8 @@
 
 ## 从源码运行（Windows、macOS）
 
+扫描与采集任务提供「暂停／继续」和「停止任务」。停止需确认，在当前文件或请求的安全停点结束，已登记文件和已保存的资料保留；未完成项目取消，安装结束或服务重启也不会自动续跑。正在停止时须等待当前步骤结束，再重新选择处理范围并启动。
+
 需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。Python 下限为 3.14，项目由 `.python-version` 固定运行版本，uv 会自动下载缺少的解释器。
 
 在 PowerShell 7（Windows）或 zsh（macOS）中依次执行：

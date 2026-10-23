@@ -366,7 +366,10 @@ class BackgroundJob:
         """
         if job_id in self._recoverable:
             from .update_tasks import check_pause
-            check_pause(self._database_path())
+            from .processing_control import user_stopped
+            db = self._database_path()
+            if self.task_key != 'library-processing' or not user_stopped(db, job_id):
+                check_pause(db)
         with self.lock:
             state = self.state
             current = state if state is not None and state[self.id_key] == job_id else None
@@ -587,6 +590,10 @@ class BackgroundJob:
             thread.join(timeout)
 
     def _stop_run(self, job_id, *, resume):
+        from .processing_control import user_stopped
+        if self.task_key == 'library-processing' and user_stopped(self._database_path(), job_id):
+            self._close_run(job_id, 'cancelled', error='用户停止任务')
+            return
         if resume and job_id in self._recoverable:
             self._paused_stops.add(job_id)
             run_id = self._run_ids.pop(job_id, None)
@@ -628,8 +635,13 @@ class BackgroundJob:
         except JobPaused:
             with self.lock:
                 if self.state is not None and self.state.get(self.id_key) == job_id:
-                    self.state.update(waiting_for_update=True, stage='等待安装完成后继续', error='',
-                                      message='任务已暂停，安装完成后自动继续。')
+                    from .processing_control import user_stopped
+                    if self.task_key == 'library-processing' and user_stopped(self._database_path(), job_id):
+                        self.state.update(status='cancelled', waiting_for_update=False, followups=[],
+                                          stage='已停止', error='', completed_at=time.time())
+                    else:
+                        self.state.update(waiting_for_update=True, stage='等待安装完成后继续', error='',
+                                          message='任务已暂停，安装完成后自动继续。')
         except Exception as error:   # 后台失败必须变成可轮询的状态，不能只留在日志里
             from .error_reporting import event
             event('background-job', error, job_id=job_id, task_key=self.task_key,
@@ -662,7 +674,7 @@ class BackgroundJob:
                     from .job_recovery import checkpoint, finish
                     checkpoint(db, self.task_key, job_id, state)
                     finish(db, self.task_key, job_id,
-                           'failed' if state.get('status') == 'failed' else 'complete')
+                           state['status'] if state.get('status') in ('failed', 'cancelled') else 'complete')
             finally:
                 activity = self._activity_files.pop(job_id, None)
                 if activity is not None:
@@ -699,6 +711,9 @@ class BackgroundJob:
         所以这里收的是调用方手上那一份，不重新读。
         """
         status = state.get("status")
+        if status == 'cancelled':
+            self._close_run(job_id, 'cancelled', summary=self._summary(state), error='用户停止任务')
+            return
         if status == "failed":
             # 声明了后继就是结算到了底，只是留下了要人处理的项（ADR-0053）：后继照派。
             # 中途抛异常的那一轮走不到声明那一步，一条都不派。

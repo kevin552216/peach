@@ -47,6 +47,101 @@ class ProcessingControlTests(unittest.TestCase):
         self.assertTrue(estimate['eta_initial'])
         self.assertIn('未含未知新增', estimate['eta_scope'])
 
+    def test_stop_intent_wakes_paused_checkpoint_and_survives_reload(self):
+        from peach.processing_control import ProcessingStopped
+        control = control_for(self.config)
+        with control.bind('one', publish=lambda **_: None, active=lambda: True, db_path=self.db):
+            control.request('pause', 'one')
+            external = ProcessingControl(control.path)
+            external.request('stop', 'one')
+            control.refresh(force=True)
+            with self.assertRaises(ProcessingStopped):
+                checkpoint()
+            self.assertFalse(control.paused)
+            with self.assertRaises(ValueError):
+                control.request('resume', 'one')
+        restored = ProcessingControl(control.path)
+        self.assertTrue(restored.stopped)
+        job_recovery.save(self.db, 'library-processing', 'one', {'stage': 'scan'}, waiting=True)
+        handler = Mock()
+        self.assertEqual(job_recovery.resume(self.db, {'library-processing': handler}), [])
+        handler.assert_not_called()
+        restored.select_job('two')
+        self.assertFalse(restored.stopped)
+
+    def test_stop_running_pipeline_preserves_ledger_and_cancels_recovery(self):
+        from peach.jobs import BackgroundJob
+        from peach.repository import LedgerDatabase
+        from peach.task_runs import TaskRunStore
+        from peach.web_library_processing import q_library_processing
+        from peach.library_processing import snapshot
+        database_root = self.config.directory('database')
+        database_root.mkdir(parents=True)
+        db = fresh_ledger(database_root)
+        runs = TaskRunStore(LedgerDatabase(db))
+        job = BackgroundJob('library-processing', runs=runs)
+        contract = SimpleNamespace(db_path=db, library_processing_job=job, database=runs.database,
+                                   candidate_root=self.root / 'candidates', cover_root=self.root / 'covers',
+                                   cache_bust=lambda: None)
+        entered, advance = threading.Event(), threading.Event()
+        def scan(*args, **kwargs):
+            with closing(__import__('sqlite3').connect(db)) as connection, connection:
+                connection.execute("INSERT INTO asset(location,path,name,medium,size) VALUES('local',?,?, 'video',1)",
+                                   ('R:\\Media\\saved.mp4', 'saved.mp4'))
+            entered.set()
+            advance.wait(5)
+            checkpoint()
+            self.fail('停止后不得领取后续工作')
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                patch('peach.library_processing._scan_sources', side_effect=scan):
+            initial = w_library_processing(contract, {'stage': 'scan', 'speed_mode': 'high'})
+            self.addCleanup(advance.set)
+            self.addCleanup(job.stop)
+            self.assertTrue(entered.wait(3))
+            reply = w_library_processing(contract, {'action': 'stop', 'job_id': initial['job_id']})
+            self.assertEqual(reply['status'], 'stopping')
+            self.assertEqual(runs.get(initial['run_id']).status, 'running')
+            self.assertEqual(job_recovery.read(db, 'library-processing'), {})
+            self.assertEqual(w_library_processing(contract, {'stage': 'metadata'})['job_id'], initial['job_id'])
+            advance.set()
+            job.thread.join(5)
+            self.assertFalse(job.thread.is_alive())
+            self.assertEqual(q_library_processing(contract, {})['status'], 'cancelled')
+            self.assertEqual(snapshot(self.config)['status'], 'cancelled')
+            self.assertEqual(runs.get(initial['run_id']).status, 'cancelled')
+            with closing(__import__('sqlite3').connect(db)) as connection:
+                self.assertEqual(connection.execute('SELECT name FROM asset').fetchall(), [('saved.mp4',)])
+            handler = Mock()
+            self.assertEqual(job_recovery.resume(db, {'library-processing': handler}), [])
+            handler.assert_not_called()
+            with self.assertRaises(ValueError):
+                w_library_processing(contract, {'action': 'resume', 'job_id': initial['job_id']})
+
+    def test_stop_installation_queue_removes_waiting_request_and_rejects_stale_identity(self):
+        from peach.jobs import BackgroundJob
+        from peach.repository import LedgerDatabase
+        from peach.task_runs import TaskRunStore
+        from peach.web_library_processing import q_library_processing
+        database_root = self.config.directory('database')
+        database_root.mkdir(parents=True)
+        db = fresh_ledger(database_root)
+        job = BackgroundJob('library-processing', runs=TaskRunStore(LedgerDatabase(db)))
+        job.state = dict(job_id='queued', status='running', waiting_for_update=True, requested_stage='scan')
+        job_recovery.save(db, 'library-processing', 'queued', {'stage': 'scan'}, waiting=True)
+        contract = SimpleNamespace(db_path=db, library_processing_job=job)
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config):
+            with self.assertRaises(ValueError):
+                w_library_processing(contract, {'action': 'stop', 'job_id': 'old'})
+            self.assertEqual(job_recovery.read(db, 'library-processing')['job_id'], 'queued')
+            reply = w_library_processing(contract, {'action': 'stop', 'job_id': 'queued'})
+            self.assertEqual(reply['status'], 'cancelled')
+            self.assertFalse(reply['waiting_for_update'])
+            self.assertEqual(q_library_processing(contract, {})['status'], 'cancelled')
+            self.assertEqual(job_recovery.read(db, 'library-processing'), {})
+            # 安装前捕获的旧状态不能重新登记已取消的任务。
+            job_recovery.import_legacy_library(db, {'job_id': 'queued', 'status': 'running'})
+            self.assertEqual(job_recovery.read(db, 'library-processing'), {})
+
     def test_new_directory_reports_counting_without_invented_time(self):
         estimate = initial_estimate(self.config, self.db, 'scan')
         self.assertIsNone(estimate['eta_seconds_min'])

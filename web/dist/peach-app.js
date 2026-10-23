@@ -45031,10 +45031,12 @@ var sF = /*#__PURE__*/ S.forwardRef(function(e, t) {
 }), cF = "/api/library-processing", lF = ["library-processing"], uF = (e) => !!e && [
 	"running",
 	"pausing",
-	"paused"
+	"paused",
+	"stopping"
 ].includes(e.status);
 function dF(e) {
 	if (!uF(e)) return "";
+	if (e.status === "stopping") return "正在停止，等待当前步骤结束";
 	if (e.status === "paused") return "已暂停，继续后更新预估";
 	if (e.status === "pausing") return "正在暂停，当前步骤结束后暂停";
 	if (e.stalled) return "等待当前文件响应，剩余时间待更新";
@@ -45072,6 +45074,8 @@ function $xe(e) {
 	return t.length ? `外部来源${t.join("、")}，7 天内不再问。` : "";
 }
 function eSe(e) {
+	if (e.status === "stopping") return "正在停止";
+	if (e.status === "cancelled") return "已停止";
 	if (e.status === "paused") return "已暂停";
 	if (e.status === "pausing") return "正在暂停";
 	let t = Qxe[e.current_action || ""] || e.stage || "正在处理", n = e.waited_seconds ? ` · 已等待 ${YA(e.waited_seconds)}` : "";
@@ -45101,12 +45105,17 @@ function vF(e) {
 	return !!e.job_id && t >= 0 && t < rSe;
 }
 function iSe(e, t, n) {
-	if (e.status === "complete" && (n || vF(e))) {
+	if ((e.status === "complete" || e.status === "cancelled") && (e.status !== "cancelled" || n) && (n || vF(e))) {
 		try {
 			if (e.job_id && localStorage.getItem(_F) === e.job_id) return;
 			e.job_id && localStorage.setItem(_F, e.job_id);
 		} catch {}
-		e.requested_stage === "previews" ? t(`视频预览已生成：${e.previews || 0} 部`) : t(`扫描与资料采集已完成：识别 ${e.identified || 0} 个番号，整理 ${e.candidates || 0} 组资料结果，自动保存 ${e.auto_applied || 0} 条` + (e.previews ? `，生成 ${e.previews} 部视频预览` : ""));
+		if (e.status === "cancelled") t("已停止扫描与采集，已保留处理结果");
+		else if (e.requested_stage === "previews") {
+			t(`视频预览已生成：${e.previews || 0} 部`);
+			return;
+		}
+		t(`扫描与资料采集已完成：识别 ${e.identified || 0} 个番号，整理 ${e.candidates || 0} 组资料结果，自动保存 ${e.auto_applied || 0} 条` + (e.previews ? `，生成 ${e.previews} 部视频预览` : ""));
 	}
 }
 //#endregion
@@ -45368,7 +45377,20 @@ function cSe({ value: e, busy: t, onChange: n, animate: r = !0 }) {
 //#endregion
 //#region src/react/library-processing/processing-controls.tsx
 function EF({ state: e, disabled: t = !1 }) {
-	let n = wA(), r = uF(e), i = e.status === "paused" ? "继续" : e.status === "pausing" ? "正在暂停" : "暂停", a = (e) => {
+	let n = wA(), r = uF(e), i = e.status === "stopping", a = async () => {
+		t || n.busy || i || !e.job_id || await Rs({
+			title: "停止扫描与采集",
+			confirmLabel: "停止任务",
+			body: "当前任务将在安全停点结束，已处理结果保留。待处理项目将取消，重启后也不会自动续跑。",
+			onConfirm: async () => {
+				let t = await U(cF, {
+					action: "stop",
+					job_id: e.job_id
+				}, "POST");
+				W.setQueryData(lF, t), W.invalidateQueries({ queryKey: lF });
+			}
+		});
+	}, o = e.status === "paused" ? "继续" : e.status === "pausing" ? "正在暂停" : "暂停", s = (e) => {
 		t || n.busy || n.run(e.action, (t) => U(cF, e, "POST", t), (e) => {
 			W.setQueryData(lF, e), W.invalidateQueries({ queryKey: lF });
 		});
@@ -45378,31 +45400,43 @@ function EF({ state: e, disabled: t = !1 }) {
 		"data-processing-controls": "",
 		children: [/* @__PURE__ */ (0, C.jsxs)("div", {
 			className: "flex flex-wrap items-center gap-2",
-			children: [/* @__PURE__ */ (0, C.jsx)(cSe, {
-				value: e.speed_mode || "standard",
-				busy: t || !!n.busy,
-				animate: e.status !== "paused" && e.status !== "pausing",
-				onChange: (t) => a({
-					action: "set_speed",
-					speed_mode: t,
-					...r ? { job_id: e.job_id } : {}
-				})
-			}), r ? /* @__PURE__ */ (0, C.jsx)(q, {
-				size: "small",
-				variant: "secondary",
-				iconOnly: !0,
-				leadingIcon: e.status === "paused" ? Bk : Gge,
-				"aria-label": i,
-				title: i,
-				disabled: t || !e.job_id || e.status === "pausing",
-				...Y(n.busy === "pause" || n.busy === "resume"),
-				onClick: () => {
-					e.job_id && a({
-						action: e.status === "paused" ? "resume" : "pause",
-						job_id: e.job_id
-					});
-				}
-			}) : null]
+			children: [
+				/* @__PURE__ */ (0, C.jsx)(cSe, {
+					value: e.speed_mode || "standard",
+					busy: t || !!n.busy || i,
+					animate: e.status !== "paused" && e.status !== "pausing" && !i,
+					onChange: (t) => s({
+						action: "set_speed",
+						speed_mode: t,
+						...r ? { job_id: e.job_id } : {}
+					})
+				}),
+				r ? /* @__PURE__ */ (0, C.jsx)(q, {
+					size: "small",
+					variant: "secondary",
+					iconOnly: !0,
+					leadingIcon: e.status === "paused" ? Bk : Gge,
+					"aria-label": o,
+					title: o,
+					disabled: t || !e.job_id || e.status === "pausing" || i,
+					...Y(n.busy === "pause" || n.busy === "resume"),
+					onClick: () => {
+						e.job_id && s({
+							action: e.status === "paused" ? "resume" : "pause",
+							job_id: e.job_id
+						});
+					}
+				}) : null,
+				r ? /* @__PURE__ */ (0, C.jsx)(q, {
+					size: "small",
+					variant: "secondary",
+					disabled: t || !e.job_id || i,
+					onClick: () => {
+						a();
+					},
+					children: i ? "正在停止" : "停止任务"
+				}) : null
+			]
 		}), n.error ? /* @__PURE__ */ (0, C.jsx)("p", {
 			role: "alert",
 			className: "text-caption-1-regular text-text-error-primary",
@@ -45425,7 +45459,8 @@ function DF({ toast: e, mode: t, monitor: n }) {
 		let r = !!n && [
 			"running",
 			"pausing",
-			"paused"
+			"paused",
+			"stopping"
 		].includes(n) && !uF(c);
 		r && o(c), (r || t === "notice") && iSe(c, e, r);
 	}, [
@@ -57236,6 +57271,11 @@ function cOe({ state: e, problem: t, settled: n, onRetry: r, toast: i }) {
 					})
 				}) : null,
 				children: t || e.error || "处理未完成，请重试"
+			}) : null,
+			n?.status === "cancelled" ? /* @__PURE__ */ (0, C.jsx)(J, {
+				tone: "neutral",
+				title: "已停止扫描与采集",
+				children: "已保留处理结果，重新开始时可选择处理范围。"
 			}) : null,
 			n?.status === "complete" ? /* @__PURE__ */ (0, C.jsx)(J, {
 				tone: "success",

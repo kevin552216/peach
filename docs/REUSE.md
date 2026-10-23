@@ -1,5 +1,9 @@
 # 复用清单
 
+## 扫描与采集的用户停止
+
+复用现有 `ProcessingControl`、`threading.Event`、任务恢复记录与 `TaskRunStore`，停止意图按任务号持久保存，并在既有安全停点检查。Python 3.14 标准库的协作取消适用于已运行线程；[`Future.cancel()`](https://docs.python.org/3.14/library/concurrent.futures.html#concurrent.futures.Future.cancel) 只处理未开始的调用，不能覆盖这里的扫描、请求与 CLI 共用状态，因此不另建执行器。用户停止立即清除恢复请求，工作者退出前保持互斥，终态为 `cancelled`，已保存结果保留。页面复用共享 `ProcessingControls` 与 `confirmModal()`；无新增依赖。
+
 ## 检查输入与源码文案
 
 测试差异复用 Git 文件快照、Python AST、标准库 TOML/JSON 解析器及现有 filelock。Python 注释和清单说明字段通过有效内容比较识别；真实依赖、执行模式和无法解析的输入保留完整验证。完整批次按测试文件保存结果，仅补齐受影响范围，不延长结果有效期。

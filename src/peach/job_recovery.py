@@ -57,10 +57,10 @@ def finish(db: Path, key: str, job_id: str, status: str) -> None:
             atomic_write_text(_path(db, key), json.dumps(data, ensure_ascii=False))
 
 
-def cancel(db: Path, key: str) -> None:
+def cancel(db: Path, key: str, *, finish_run=True) -> None:
     with _mutex(state_for(db)):
         data = read(db, key)
-        if data.get('run_id') is not None:
+        if finish_run and data.get('run_id') is not None:
             from .task_runs import TaskRunStore
             TaskRunStore(db).finish(data['run_id'], 'cancelled', error='用户停止任务')
         _path(db, key).unlink(missing_ok=True)
@@ -107,8 +107,8 @@ def resume(db: Path, handlers: dict) -> list[str]:
                 data = read(db, key)
                 pid = data.get("pid")
                 if key == 'library-processing':
-                    from .processing_control import user_paused
-                    if user_paused(db, data.get('job_id')):
+                    from .processing_control import user_paused, user_stopped
+                    if user_paused(db, data.get('job_id')) or user_stopped(db, data.get('job_id')):
                         continue
                 if (data.get("status") != "active" or not isinstance(data.get("request"), dict)
                         or (isinstance(pid, int) and pid != os.getpid() and process_alive(pid))):
@@ -163,7 +163,8 @@ def import_legacy_library(db: Path, previous: dict) -> None:
         latest = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         latest = previous
-    if latest.get('status') == 'complete':
+    from .processing_control import user_stopped
+    if latest.get('status') in ('complete', 'cancelled') or user_stopped(db, latest.get('job_id')):
         return
     from .task_runs import TaskRunStore
     store = TaskRunStore(db)

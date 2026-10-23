@@ -2,7 +2,11 @@
 
 ## 扫描与采集的用户停止
 
-复用现有 `ProcessingControl`、`threading.Event`、任务恢复记录与 `TaskRunStore`，停止意图按任务号持久保存，并在既有安全停点检查。Python 3.14 标准库的协作取消适用于已运行线程；[`Future.cancel()`](https://docs.python.org/3.14/library/concurrent.futures.html#concurrent.futures.Future.cancel) 只处理未开始的调用，不能覆盖这里的扫描、请求与 CLI 共用状态，因此不另建执行器。用户停止立即清除恢复请求，工作者退出前保持互斥，终态为 `cancelled`，已保存结果保留。页面复用共享 `ProcessingControls` 与 `confirmModal()`；无新增依赖。
+复用现有 `ProcessingControl`、`threading.Event`、任务恢复记录与 `TaskRunStore`，停止意图按任务号持久保存，并在既有安全停点检查。Python 3.14 标准库的协作取消适用于已运行线程；[`Future.cancel()`](https://docs.python.org/3.14/library/concurrent.futures.html#concurrent.futures.Future.cancel) 只处理未开始的调用，执行中的扫描、请求与 CLI 使用共享停止意图退出。用户停止立即清除恢复请求，工作者退出前保持互斥，终态为 `cancelled`，已保存结果保留。页面复用共享 `ProcessingControls` 与 `confirmModal()`；无新增依赖。
+
+任务工作表统一由 `SelectedProcessing` 编排，阶段入口也转换为同一份选择。扫描、媒体探测、NFO／候选、来源证据缓存、封面、预览均复用现有原语；显式工作表只补缺失字段，不触发未选中的图片或后继。阶段入口保留已有字段复核与人物后继策略，执行顺序同样先资料、后图片。Python 3.14 标准库 `ThreadPoolExecutor`（PSF 许可）只提交两条完整通道，各通道逐项领取；网络通道复用来源限流与缓存，媒体通道复用既有探测并发上限与逐文件抽帧。`copy_context()` 传递同一停止控制和安装上下文，磁盘守卫按通道复查，持久快照由 `RLock` 串行保存。无需引入调度框架或新的运行依赖。
+
+疑似重复暂缓复用已登记的番号、大小和已知时长，只跳过预览；不执行全文件哈希、不共享文件或图像产物。每个暂缓资产有独立记录，关闭选项的新任务按实际产物继续补缺。临时账本回归覆盖单项隔离、人工字段、真实预览复用、并行屏障、暂停／停止、失败退出、原配置恢复及暂缓回补。
 
 ## 检查输入与源码文案
 

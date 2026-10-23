@@ -47,6 +47,8 @@ Watch history, favorites and settings stay on your computer. Scanning leaves ori
 
 Scanning, follow updates and new-release metadata collection save their progress and continue unfinished items after the app restarts. Scanning and collection can be paused, resumed, or stopped to cancel automatic recovery while retaining saved results. See [task recovery](docs/OPERATIONS.md#长时任务断点续跑) for recovery boundaries.
 
+New tasks can select file scanning, media properties, metadata, covers and previews, filling only missing results. Properties and metadata are selected first; covers and previews can run as separate low-resource tasks. Choose sequential execution or parallel network and media work.
+
 The combined "Send version statistics and error diagnostics (recommended)" option is checked by default. Clear it during installation, first setup or in settings to disable both. Saved opt-out choices are preserved. While enabled, it sends the listed technical fields to Sentry; full logs, diagnostic ZIPs, media details and watch history are excluded. See [remote diagnostics](docs/DIAGNOSTICS.md#可选远程诊断).
 
 Sharing library and taste details is a separate option in the installer and settings, off by default. Review the complete fields and local preview before explicitly consenting to weekly snapshots of works, tags, ratings, viewing summaries and every preference dimension. Account, device and installation identifiers are excluded. Detailed snapshots can still be linked or re-identified, and the receiving service can see the connection IP. See the [diagnostics reference](docs/DIAGNOSTICS.md#馆藏与口味群体研究).

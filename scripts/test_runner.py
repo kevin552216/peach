@@ -60,7 +60,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     # 接线的两端，改哪一端都要两边一起验。
     "media": ("test_external_playback.py", "test_runtime_consistency.py", "test_endcard.py", "test_fastapi_api.py", "test_jobs.py",
               "test_task_runs.py", "test_followups.py", "test_task_center_integration.py",
-              "test_frame_capture.py", "test_timeline_sheets.py", "test_processing_control.py",
+              "test_frame_capture.py", "test_timeline_sheets.py", "test_processing_control.py", "test_library_processing_tasks.py",
               "test_web_timeline_thumbnails.py",
               "test_interaction.py", "test_media.py", "test_mp4repair.py",
               "test_mp4recover.py", "test_web_media_repair.py",
@@ -71,7 +71,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     "sync": ("test_sync*.py", "test_platform.py", "test_mount.py", "test_tray*.py", "test_macos_standalone.py", "test_log_retention.py",
              "test_mdns.py", "test_netwatch.py", "test_certs.py",
              "test_review_mirror.py", "test_runtime_prepare.py"),
-    "metadata": ("test_custom_metadata.py", "test_scraping_access.py", "test_browser_transport.py", "test_metadata*.py", "test_genre_taxonomy.py", "test_processing_control.py",
+    "metadata": ("test_custom_metadata.py", "test_scraping_access.py", "test_browser_transport.py", "test_metadata*.py", "test_genre_taxonomy.py", "test_processing_control.py", "test_library_processing_tasks.py",
                  "test_fc2*.py", "test_local_poster.py",
                  "test_community_catalog.py",
                  "test_babepedia_match.py",
@@ -138,7 +138,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
             "test_agency_entity.py", "test_label_maker.py", "test_dependency_policy.py",
             "test_desktop_settings.py", "test_dev_copy.py",
             "test_fastapi_api.py", "test_follow_assets.py", "test_follow_web.py",
-            "test_metadata_library.py", "test_processing_control.py", "test_studio_icon_variants.py", "test_web_settings.py", "test_web_library_shortcuts.py", "test_company_profiles.py"),
+            "test_metadata_library.py", "test_processing_control.py", "test_library_processing_tasks.py", "test_studio_icon_variants.py", "test_web_settings.py", "test_web_library_shortcuts.py", "test_company_profiles.py"),
     "core": ("test_access.py", "test_auth.py", "test_config.py", "test_field_owners.py",
              "test_entity_classification.py",
              "test_migrations.py", "test_ledger_revision.py",
@@ -205,6 +205,7 @@ AUTO_SCOPE_FILES: dict[str, tuple[str, ...]] = {
     # `test_stale_candidates.py` 在 metadata，`test_web_e2e.py` 在 web 里整条跑它。
     # 模块名与测试文件名对不上，按名字推不出来，不指明就退化成 full。
     "src/peach/library_processing.py": ("metadata", "web"),
+    "src/peach/library_processing_tasks.py": ("media", "metadata", "web"),
     "src/peach/local_poster.py": ("metadata", "web"),
     "src/peach/processing_control.py": ("media", "metadata", "web"),
     # 刮削后继：主体测试 `test_followups.py` 与 `test_studio_followup.py`，按名字推不出来。

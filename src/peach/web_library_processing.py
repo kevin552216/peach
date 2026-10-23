@@ -3,7 +3,7 @@ import json
 
 from . import settings_file
 from .library_processing import (ALL_STAGES, COLLECT_STAGE, SCAN_STAGE, STAGES,
-                                METADATA_STAGE, PREVIEWS_STAGE, _asset_selection,
+                                METADATA_STAGE, PREVIEWS_STAGE, PROBE_STAGE, COVERS_STAGE, _asset_selection,
                                 decorate, issues_path, process_library, snapshot)
 from .processing_control import control_for, initial_estimate, valid_mode, mode_ratio
 
@@ -75,7 +75,7 @@ def _control_action(contract, config, body):
         identity = current_job_id.set(str(job_id))
         run = current_run.set(recovery.get('run_id'))
         try:
-            return w_library_processing(contract, {
+            return w_library_processing(contract, {**recovery.get('request', {}),
                 'stage': previous.get('requested_stage') or ALL_STAGES,
                 **({'asset_ids': previous['asset_ids']} if previous.get('asset_ids') else {}),
                 'speed_mode': control.mode}, resume=True)
@@ -197,7 +197,7 @@ def _processing_request(contract, config, previous, body):
     if stage not in STAGES:
         raise ValueError('处理阶段无效')
     from .media_processing_policy import metadata_only
-    if stage == PREVIEWS_STAGE and metadata_only(config.directory('state')):
+    if stage == PREVIEWS_STAGE and 'tasks' not in (body or {}) and metadata_only(config.directory('state')):
         raise ValueError('视频预览生成已关闭，请先在媒体库设置中开启')
     return retry_ids, asset_ids, stage
 
@@ -214,6 +214,10 @@ def w_library_processing(contract, body, *, resume=False):
         return previous
     mode = valid_mode(control_for(config).mode if resume else
                       (body or {}).get('speed_mode') or control_for(config).mode)
+    from .library_processing_tasks import selection_for
+    selection = selection_for(config, stage, (body or {}).get('tasks'), asset_ids or retry_ids,
+        (body or {}).get('execution_mode', 'sequential'), (body or {}).get('defer_suspected_duplicates', False))
+    selected_options = _selection_options(selection)
     control_for(config).request('set_speed', mode=mode)
     def work(job_id):
         try:
@@ -224,6 +228,7 @@ def w_library_processing(contract, body, *, resume=False):
                 database=contract.database,
                 resume_state=previous if resume else None,
                 speed_mode=control_for(config).mode,
+                **selected_options,
                 active=lambda: (contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
                 report=lambda state: contract.library_processing_job.update(job_id, **{
                     key: value for key, value in state.items() if key != 'job_id'}))
@@ -233,9 +238,29 @@ def w_library_processing(contract, body, *, resume=False):
     # 起步那行字按这一趟真正要做的事写：点了「只扫描」却看到「读取本地资料」，
     # 人会以为点错了。
     labels = {ALL_STAGES: '准备处理', SCAN_STAGE: '准备扫描文件', COLLECT_STAGE: '准备采集资料',
-              METADATA_STAGE: '准备采集资料', PREVIEWS_STAGE: '准备生成预览图'}
+              METADATA_STAGE: '准备采集资料', PREVIEWS_STAGE: '准备生成预览图',
+              PROBE_STAGE: '准备读取媒体属性', COVERS_STAGE: '准备补全封面'}
     return contract.library_processing_job.start(
         work, restart=True, initial={'stage': labels[stage], 'requested_stage': stage,
-                                    **initial_estimate(config, contract.db_path, stage, asset_ids or retry_ids, mode)},
-        recovery={'stage': stage, 'speed_mode': mode, **({'asset_ids': asset_ids or retry_ids}
+                                    **_selection_state(selection),
+                                    **initial_estimate(config, contract.db_path, stage, asset_ids or retry_ids, mode,
+                                                       tasks=selected_options.get('tasks'))},
+        recovery={'stage': stage, 'speed_mode': mode, **selected_options, **({'asset_ids': asset_ids or retry_ids}
                                     if asset_ids is not None or retry_ids is not None else {})})
+
+
+def _selection_state(selection):
+    if not selection:
+        return {}
+    return dict(requested_tasks=selection['tasks'], execution_mode=selection['execution_mode'],
+                defer_suspected_duplicates=selection['defer_suspected_duplicates'])
+
+
+def _selection_options(selection):
+    options = dict(execution_mode=selection['execution_mode'],
+                   defer_suspected_duplicates=selection['defer_suspected_duplicates'])
+    if not selection['legacy_policy']:
+        return dict(tasks=selection['tasks'], **options)
+    if options == dict(execution_mode='sequential', defer_suspected_duplicates=False):
+        return {}
+    return options

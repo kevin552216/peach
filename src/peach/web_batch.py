@@ -23,7 +23,8 @@ from functools import cache
 from pathlib import Path, PureWindowsPath
 from typing import Sequence
 
-from .catalog_rules import duration_clusters, is_jav_code, normalise_code_key
+from .catalog_rules import is_jav_code
+from .duplicate_files import q_duplicates as q_duplicates
 from .config import GENERATED_DIR, LOCATION_ROOT_DECLARATIONS
 from .field_owners import USER_MANUAL, write_owned_fields
 from .media_sources import SCANNABLE_LOCATIONS
@@ -926,92 +927,3 @@ def w_batch(contract: WebContract, body):
     handle.finish("succeeded", summary={"operation": operation,
                                         "changed": len(valid_ids)})
     return {"ok": True, "operation": operation, "changed": len(valid_ids), **state_receipt}
-
-
-def _add_large_short_copy_cluster(items: list[dict], clusters: list[list[dict]]):
-    """把同番号的大体积短版本并到完整版所在组，返回这个组。"""
-    claimed = {item["id"] for cluster in clusters for item in cluster}
-    full = max(items, key=lambda item: item.get("duration") or 0)
-    full_duration = float(full.get("duration") or 0)
-    short_copies = [item for item in items
-                    if item["id"] not in claimed and item["id"] != full["id"]
-                    and (item.get("size") or 0) >= JUNK_VIDEO_MAX_BYTES
-                    and 0 < float(item.get("duration") or 0) < full_duration * 0.2
-                    and not PART_MARK.search(PureWindowsPath(
-                        str(item.get("name") or "")).stem)]
-    if not short_copies:
-        return None
-    cluster = next((candidate for candidate in clusters if any(
-        item["id"] == full["id"] for item in candidate)), None)
-    if cluster is None:
-        cluster = [full]
-        clusters.append(cluster)
-    cluster.extend(short_copies)
-    return cluster
-
-
-def _duplicate_groups(grouped: dict[str, list[dict]]):
-    """把已按番号归组的资产整理成重复项 API 结果。"""
-    groups = []
-    for code, items in grouped.items():
-        if len(items) < 2:
-            continue
-        clusters = [cluster for cluster in duration_clusters(items) if len(cluster) >= 2]
-        short_copy_cluster = _add_large_short_copy_cluster(items, clusters)
-        for cluster in clusters:
-            largest = max(cluster, key=lambda x: x.get("size") or 0)
-            longest = max(cluster, key=lambda x: x.get("duration") or 0)
-            hashes_present = [x["hash"] for x in cluster if x["hash"]]
-            hashes = set(hashes_present)
-            for item in cluster:
-                item["is_largest"] = item["id"] == largest["id"]
-                item["is_longest"] = item["id"] == longest["id"]
-                item.pop("hash", None)
-                item.pop("disposal", None)
-            groups.append({
-                "code": code,
-                "files": sorted(cluster, key=lambda x: -(x.get("size") or 0)),
-                "count": len(cluster),
-                "evidence": "same_code_short_copy" if cluster is short_copy_cluster
-                else "duration",
-                # 必须每个文件都有 sha1 且完全相同才算确证字节一致。缺一个哈希
-                # 就只是「时长相近」的推断，不能对外宣称已确证。
-                "identical": len(hashes) == 1 and len(hashes_present) == len(cluster),
-                "drives": sorted({x["drive"] for x in cluster}),
-                "cross_drive": len({x["drive"] for x in cluster}) > 1,
-                "reclaimable": sum(x.get("size") or 0 for x in cluster)
-                - (largest.get("size") or 0),
-            })
-    return groups
-
-
-def q_duplicates(contract: WebContract, args):
-    """按番号 + 时长找真重复，也收同番号的大体积短版本。"""
-    limit = min(max(int(args.get("limit", "60")), 1), 300)
-    offset = max(int(args.get("offset", "0")), 0)
-    with contract.read_connection() as connection:
-        rows = connection.execute(
-            "SELECT id,code,location,path,name,size,duration,hash,disposal "
-            "FROM asset WHERE medium='video' AND code IS NOT NULL AND code<>'' "
-            "AND disposal IS NULL"
-        ).fetchall()
-
-    grouped: dict[str, list[dict]] = {}
-    for row in rows:
-        if not is_jav_code(row["code"]):
-            continue
-        item = dict(row)
-        # 盘符只用于判定跨盘；重复项页面还要显示完整路径，不能在契约层丢掉。
-        item["drive"] = str(item.get("path") or "")[:2].upper()
-        grouped.setdefault(normalise_code_key(row["code"]), []).append(item)
-
-    groups = _duplicate_groups(grouped)
-    groups.sort(key=lambda g: -g["reclaimable"])
-    window = groups[offset:offset + limit]
-    return {
-        "total": len(groups),
-        "files": sum(g["count"] for g in groups),
-        "reclaimable": sum(g["reclaimable"] for g in groups),
-        "groups": window,
-        "has_more": offset + limit < len(groups),
-    }

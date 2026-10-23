@@ -406,6 +406,10 @@
   background: linear-gradient(180deg, var(--glass-sheen), transparent 62%), var(--glass-pick-fill);
   box-shadow: inset 0 0 0 1px var(--glass-rim), var(--glass-pick-shadow);
 }
+.peach-react [data-glass-pill][aria-pressed="true"] {
+  background-color: var(--color-background-primary-hover);
+  color: var(--color-text-primary);
+}
 
 /* 索引页的过滤框与播放列表的新建框在窄屏把字号提到 16px：小于这一档，手机浏览器聚焦时
  * 会把整页放大。 */

@@ -118,7 +118,7 @@ describe('管理页面容器与骨架', () => {
         await page.route('**/api/duplicates?**', async route => {
           await pending;
           await route.fulfill({ json: { total: 1, files: 2, reclaimable: 1000, groups: [{
-            code: 'DEMO-001', count: 2, identical: true, drives: ['R:'], cross_drive: false, reclaimable: 1000,
+            key: 'demo-001', kept: false, code: 'DEMO-001', count: 2, identical: true, drives: ['R:'], cross_drive: false, reclaimable: 1000,
             files: [1, 2].map(id => ({ id, name: `DEMO-${id}.mp4`, path: `R:\\Media\\DEMO-${id}.mp4`,
               location: 'local', drive: 'R:', size: 1000, duration: 3600, is_largest: id === 1, is_longest: id === 2 })),
           }] } });

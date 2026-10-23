@@ -2832,7 +2832,7 @@ class LibraryPreviewCompletionTests(unittest.TestCase):
         finish.assert_not_called()
         factory.assert_not_called()
         self.assertEqual([(step['id'], step['status']) for step in result['steps']],
-                         [('sources', 'complete'), ('media', 'complete')])
+                         [('previews', 'complete')])
 
     def test_missing_ffmpeg_is_retryable_and_collection_can_finish_its_work(self):
         self.resolver.ffmpeg.return_value = None
@@ -2867,13 +2867,13 @@ class LibraryPreviewCompletionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '视频预览生成已关闭'):
             self.run_processing(stage='previews', asset_ids=[1])
 
-    def test_local_preview_is_available_when_online_collection_starts(self):
+    def test_online_collection_finishes_before_local_preview_generation(self):
         with self.database.write_transaction() as connection:
             connection.execute("UPDATE asset SET code='ABW-358' WHERE id=1")
         def collect(*_args, **_kwargs):
             with self.database.read_connection() as connection:
                 path = connection.execute('SELECT snapshot_path FROM asset WHERE id=1').fetchone()[0]
-            self.assertTrue(Path(path).is_file())
+            self.assertIsNone(path)
             return [], 0
         with patch('peach.library_processing.FFmpegResolver', return_value=self.resolver), \
                 patch('peach.frame_capture.capture_with_retry', return_value=True), \
@@ -2881,7 +2881,7 @@ class LibraryPreviewCompletionTests(unittest.TestCase):
                 patch('peach.library_processing._RemoteSession.collect', side_effect=collect) as online, \
                 patch('peach.library_processing._finish_collection', return_value={}):
             result = self.run_processing(stage='collect', asset_ids=[1])
-        online.assert_called_once()
+        self.assertEqual(online.call_count, 2)
         self.assertEqual(result['previews'], 1)
         with self.database.read_connection() as connection:
             path = connection.execute('SELECT snapshot_path FROM asset WHERE id=1').fetchone()[0]

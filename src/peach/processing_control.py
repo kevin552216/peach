@@ -163,6 +163,7 @@ class ProcessingControl:
         self.db_path = None
         self.next_work = {}
         self.paused_seconds = 0.0
+        self.pause_started = None
         self.reloaded_at = 0.0
 
     def refresh(self, force=False):
@@ -207,6 +208,7 @@ class ProcessingControl:
             if self.job_id != job_id:
                 self.job_id, self.paused, self.paused_seconds = job_id, False, 0.0
                 self.stopped = False
+                self.pause_started = None
 
     @contextmanager
     def bind(self, job_id, *, publish, active, db_path, mode=None):
@@ -240,12 +242,17 @@ class ProcessingControl:
             if paused:
                 if started is None:
                     started = time.monotonic()
+                    with self.lock:
+                        if self.pause_started is None:
+                            self.pause_started = started
                     self.publish(status='paused', speed_mode=mode)
                 self.event.wait(0.25)
                 continue
             if started is not None:
-                spent = time.monotonic() - started
-                self.paused_seconds += spent
+                with self.lock:
+                    spent = time.monotonic() - self.pause_started if self.pause_started is not None else 0
+                    self.pause_started = None
+                    self.paused_seconds += spent
                 self.publish(status='running', speed_mode=mode, resumed_after=spent)
                 started = None
             # 控制只作用于当前馆藏任务；在单项 I/O 之间留出空档。
@@ -270,7 +277,7 @@ def user_stopped(db_path, job_id):
     return data.get('job_id') == job_id and data.get('stopped') is True
 
 
-def initial_estimate(config, db_path, stage, asset_ids=None, mode=None):
+def initial_estimate(config, db_path, stage, asset_ids=None, mode=None, *, tasks=None):
     """仅使用账本统计，不在启动 HTTP 请求里遍历媒体目录。"""
     mode = mode or control_for(config).mode
     query = "SELECT COUNT(*), COALESCE(SUM(size),0) FROM asset WHERE medium='video' AND disposal IS NULL"
@@ -287,11 +294,14 @@ def initial_estimate(config, db_path, stage, asset_ids=None, mode=None):
         count, size = connection.execute(query, parameters).fetchone()
     # 抽帧只读取局部数据；文件总大小仅作为编解码复杂度的温和修正，不按全量读取估时。
     size_factor = min(2.0, max(0.8, (size / max(1, count) / 1024**3) ** 0.15))
-    seconds = {'scan': 0.2, 'metadata': 8.0, 'previews': 12.0 * size_factor,
+    seconds = {'scan': 0.2, 'probe': 1.0, 'covers': 4.0, 'metadata': 8.0, 'previews': 12.0 * size_factor,
                'collect': 20.0 * size_factor, 'all': 20.2 * size_factor}[stage]
+    if tasks is not None:
+        rates = dict(scan=0.2, probe=1.0, metadata=8.0, covers=4.0, previews=12.0 * size_factor)
+        seconds = sum(rates[task] for task in tasks)
     history = _read(config.directory('state') / 'library-processing-timing.json')
     sample = history.get(stage)
-    historical = isinstance(sample, (int, float)) and math.isfinite(sample) and sample > 0
+    historical = tasks is None and isinstance(sample, (int, float)) and math.isfinite(sample) and sample > 0
     if historical:
         seconds = sample
     factor = MODE_FACTORS[valid_mode(mode)]

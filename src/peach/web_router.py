@@ -94,6 +94,7 @@ from .web_custom_metadata import q_custom_metadata, w_custom_metadata
 from .web_resource_sync import w_purge_missing, w_resource_sync_apply, w_resource_sync_scan
 from .web_review import q_review, w_review_decision, w_review_genre
 from .web_settings import q_settings, w_settings
+from .web_filename_rules import q_filename_rules, w_filename_rules
 from .web_library_shortcuts import q_library_shortcuts, w_library_shortcuts
 from .web_folders import q_folders, w_folder_preview, w_folder_rule
 from .web_scraping import (
@@ -317,6 +318,7 @@ def _post_empty_trash(contract, _body):
 
 
 GET_HANDLERS = {
+    "/api/filename-rules": q_filename_rules,
     "/api/media-processing": q_media_processing,
     "/api/folders": q_folders,
     "/api/tasks": q_tasks,
@@ -384,6 +386,7 @@ GET_HANDLERS = {
 }
 
 POST_HANDLERS = {
+    "/api/filename-rules": w_filename_rules,
     "/api/media-processing": w_media_processing,
     "/api/folders/preview": w_folder_preview,
     "/api/folders/rule": w_folder_rule,
@@ -451,6 +454,7 @@ POST_HANDLERS = {
 #: 不该拦它们——「查找」只联网、「存凭据」只写本机 secrets 文件，都不碰账本。
 #: 追更的「查找」在只读端被拦成 409 是实测踩到的。
 READ_ONLY_POST_ROUTES = frozenset({
+    "/api/filename-rules",
     "/api/media-processing",
     "/api/folders/preview",
     "/api/custom-metadata",

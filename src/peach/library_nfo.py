@@ -25,7 +25,8 @@ _NUMBERED = re.compile(r'(.*\D|)(\d+)(\D*)')
 class SidecarIndex:
     """目录的影片、NFO 和连号图片分组；一份索引服务同目录的全部影片。"""
 
-    def __init__(self, files: dict[str, Path]):
+    def __init__(self, files: dict[str, Path], code_from_filename=release_code_from_filename):
+        self.code_from_filename = code_from_filename
         self.files = files
         self.videos = []
         images = []
@@ -35,7 +36,7 @@ class SidecarIndex:
             if suffix in VIDEO:
                 self.videos.append(path)
             elif suffix == '.nfo':
-                self.nfos.append((path, release_code_from_filename(path.stem)))
+                self.nfos.append((path, self.code_from_filename(path.stem)))
             elif suffix in POSTER_EXTENSIONS:
                 images.append(path)
         self.single = len(self.videos) == 1
@@ -54,7 +55,7 @@ class SidecarIndex:
         if not code or 'movie.nfo' not in self.files:
             return None
         if self.video_codes is None:
-            self.video_codes = [release_code_from_filename(path.name) for path in self.videos]
+            self.video_codes = [self.code_from_filename(path.name) for path in self.videos]
         if code not in self.shared:
             self.shared[code] = all(same_release_code(code, value) for value in self.video_codes)
         return self.files.get('movie.nfo') if self.shared[code] else None
@@ -62,7 +63,7 @@ class SidecarIndex:
     def for_video(self, video: Path):
         nfo = self.files.get((video.stem + '.nfo').casefold())
         if nfo is None and self.nfos:
-            code = release_code_from_filename(video.name)
+            code = self.code_from_filename(video.name)
             matching = [path for path, value in self.nfos if code and same_release_code(code, value)]
             if len(matching) == 1:
                 nfo = matching[0]

@@ -47,6 +47,7 @@ dependencies = [
   "pystray==0.19.5",
   "pydantic==2.14.1",
   "resvg-py==0.5.0",
+  "regex==2026.9.29",
   "sentry-sdk==2.72.0",
   "socksio==1.0.0",
   "starlette==1.8.0",

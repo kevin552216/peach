@@ -71,7 +71,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     "sync": ("test_sync*.py", "test_platform.py", "test_mount.py", "test_tray*.py", "test_macos_standalone.py", "test_log_retention.py",
              "test_mdns.py", "test_netwatch.py", "test_certs.py",
              "test_review_mirror.py", "test_runtime_prepare.py"),
-    "metadata": ("test_custom_metadata.py", "test_scraping_access.py", "test_browser_transport.py", "test_metadata*.py", "test_genre_taxonomy.py", "test_processing_control.py",
+    "metadata": ("test_filename_rules.py", "test_custom_metadata.py", "test_scraping_access.py", "test_browser_transport.py", "test_metadata*.py", "test_genre_taxonomy.py", "test_processing_control.py",
                  "test_fc2*.py", "test_local_poster.py",
                  "test_community_catalog.py",
                  "test_babepedia_match.py",
@@ -131,7 +131,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     # 后面七个文件的主体不在这一层，但各有一段断言读 `web/` 或 `frontend/` 的源码，
     # 所以本域也要登记它们：改了 `web/app.js` 却漏跑读它的测试，`test_test_planning.py`
     # 的域映射门槛会在本地就红。
-    "web": ("test_frontend_build.py", "test_web_ui.py", "test_web_js.py", "test_web_e2e.py",
+    "web": ("test_filename_rules.py", "test_frontend_build.py", "test_web_ui.py", "test_web_js.py", "test_web_e2e.py",
             "test_subtitle_search.py",
             "test_legacy_shell_routes.py",
             "test_web_perf.py", "test_copy_final_state.py",
@@ -198,6 +198,8 @@ AUTO_SCOPE_FILES: dict[str, tuple[str, ...]] = {
     "src/peach/genre_taxonomy.py": ("metadata", "catalog", "web"),
     # 标签词表是 genre 投影的落点，复核页与目录页也按它筛选。
     "src/peach/catalog_rules.py": ("metadata", "catalog", "web"),
+    "src/peach/filename_rules.py": ("metadata", "web"),
+    "src/peach/library_nfo.py": ("metadata", "web"),
     # 来源顺序一变，`test_scripts.py` 里钉住的 field_rank 就跟着挪，而那份用例
     # 住在 tooling——按名字只推得出 metadata，不指明就跑不到。
     "src/peach/metadata_policy.py": ("metadata", "tooling"),

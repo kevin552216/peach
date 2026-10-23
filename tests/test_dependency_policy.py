@@ -119,6 +119,7 @@ class DependencyPolicyTests(unittest.TestCase):
             "pydantic": "pydantic",
             "pystray": "pystray",
             "resvg_py": "resvg-py",
+            "regex": "regex",
             "sentry_sdk": "sentry-sdk",
             "starlette": "starlette",
             "torznab": "torznab",

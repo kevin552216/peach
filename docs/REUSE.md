@@ -1,5 +1,13 @@
 # 复用清单
 
+## 自定义文件名规则
+
+用户规则复用标准库 `re` 的语法与替换引用校验、既有 `catalog_rules` 番号规范化、`SidecarIndex` 配对与 `fsutil.atomic_write_text`。匹配使用 [regex](https://pypi.org/project/regex/) `2026.9.29`，许可证为 Apache-2.0 AND CNRI-Python，支持 Python 3.10 及以上和 Windows CPython；单次匹配限时 50 毫秒。标准库 `re` 没有匹配超时参数，因此只承担输入校验，不执行文件名上的用户模式。运行依赖与 wheel 固定在 `pyproject.toml`、`uv.lock`，界面复用 BoardUI 的 Input、Switch、Button 与配置分区。规则保存在本机 state 目录，预览与入库共用解析器；规则指纹参与本地证据缓存校验。隔离测试覆盖捕获引用、优先级、停用与清空、超时、错误保存保留旧值、NFO 配对和进入 FC2 来源链。
+
+## FC2 文件名番号
+
+内置文件名解析复用 `catalog_rules` 的 FC2 商品号形态、推广标记清理与规范化函数，以及 Python 3.14 标准库 `re`。Peach 的领域规则允许开头的排序加号、`[JAV]`、`[Uncensored]` 标签，以及商品号后的片名与分卷；正文中提及的 FC2 号码不作为文件身份。完整番号字段与来源查询仍使用严格的整串匹配。短写法与历史提交 `280f4350999ed49f3df938012dc6f6f9b7be698f` 共用同一商品号规则。隔离测试覆盖标题、标签、分卷、不完整号码与本地登记后进入 FC2 来源链的行为。
+
 ## 检查输入与源码文案
 
 测试差异复用 Git 文件快照、Python AST、标准库 TOML/JSON 解析器及现有 filelock。Python 注释和清单说明字段通过有效内容比较识别；真实依赖、执行模式和无法解析的输入保留完整验证。完整批次按测试文件保存结果，仅补齐受影响范围，不延长结果有效期。

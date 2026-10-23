@@ -80,7 +80,7 @@ describe('缺预览时的统一补全入口', () => {
         await page.keyboard.press('Enter');
         const menu = page.getByRole('dialog', { name: '同步方式' });
         await menu.waitFor();
-        assert.deepEqual(await menu.getByRole('button').allTextContents(), ['同步这些影片', '仅生成视频预览', '仅补全资料']);
+        assert.deepEqual(await menu.getByRole('button').allTextContents(), ['同步这些影片', '仅读取媒体属性', '仅补齐封面', '仅生成视频预览', '仅补全资料']);
         const box = await menu.boundingBox();
         assert.ok(box && box.x >= 0 && box.x + box.width <= viewport.width);
         await page.keyboard.press('Escape');
@@ -105,9 +105,12 @@ describe('缺预览时的统一补全入口', () => {
         }
         await more.click();
         await menu.getByRole('button', { name: '仅生成视频预览' }).click();
+        const task = page.getByRole('dialog', { name: '新任务', exact: true });
+        await task.getByRole('button', { name: '开始任务', exact: true }).click();
         await prompt.waitFor({ state: 'hidden' });
         await page.locator('[data-media-card] img.poster').waitFor();
-        assert.deepEqual(posts, [{ stage: 'previews', asset_ids: [11] }]);
+        assert.deepEqual(posts, [{ stage: 'previews', tasks: ['previews'], execution_mode: 'sequential',
+          defer_suspected_duplicates: false, speed_mode: 'low', asset_ids: [11] }]);
         assert.deepEqual(opened.problems, []);
       } finally { await opened.close() }
     });

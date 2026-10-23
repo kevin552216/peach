@@ -6,7 +6,12 @@ import { LibraryCompletionPrompt, missingPreviewIds } from '../../src/react/libr
 import { LIBRARY_PROCESSING_KEY } from '../../src/react/library-processing/library-processing';
 import type { MediaItem } from '../../src/react/catalog-grid/types';
 import { queryClient } from '../../src/react/query';
-import { buttonNamed, click, mount, pending } from './render';
+import { buttonNamed, click as renderClick, mount, pending, submit } from './render';
+
+async function click(target: Parameters<typeof renderClick>[0]) {
+  await renderClick(target);
+  if (document.querySelector('dialog input[name="processing-task"]')) await submit(document.querySelector('dialog form'));
+}
 
 notifyManager.setScheduler(notify => notify());
 afterEach(() => queryClient.clear());
@@ -58,9 +63,9 @@ it('默认补全与下拉分项都只提交当前缺图影片，菜单包含主�
     await click(buttonNamed(label, menu));
   }
   expect(posts).toEqual([
-    { stage: 'collect', asset_ids: [7, 8] },
-    { stage: 'previews', asset_ids: [7, 8] },
-    { stage: 'metadata', asset_ids: [7, 8] },
+    { stage: 'collect', tasks: ['metadata', 'covers', 'previews'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'standard', asset_ids: [7, 8] },
+    { stage: 'previews', tasks: ['previews'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'low', asset_ids: [7, 8] },
+    { stage: 'metadata', tasks: ['metadata'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'standard', asset_ids: [7, 8] },
   ]);
 });
 

@@ -12,7 +12,12 @@ ACTIVE = ('running', 'pausing', 'paused', 'stopping')
 
 def _current(contract):
     live = contract.library_processing_job.snapshot()
-    return live if live and live.get('status') in (*ACTIVE, 'cancelled') else snapshot(settings_file.active())
+    if live and live.get('status') in ACTIVE:
+        return live
+    saved = snapshot(settings_file.active())
+    if live and live.get('status') == 'cancelled' and saved.get('job_id') in (None, '', live.get('job_id')):
+        return live
+    return saved
 
 
 def q_library_processing(contract, _args):

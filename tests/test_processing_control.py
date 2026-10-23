@@ -142,6 +142,43 @@ class ProcessingControlTests(unittest.TestCase):
             job_recovery.import_legacy_library(db, {'job_id': 'queued', 'status': 'running'})
             self.assertEqual(job_recovery.read(db, 'library-processing'), {})
 
+    def test_cancelled_web_job_observes_and_controls_another_instances_new_task(self):
+        from filelock import FileLock
+        from peach.jobs import BackgroundJob
+        from peach.library_processing import _save, state_path
+        from peach.web_library_processing import q_library_processing
+        job = BackgroundJob('library-processing')
+        job.state = dict(job_id='old', status='cancelled')
+        contract = SimpleNamespace(db_path=self.db, library_processing_job=job)
+        path = state_path(self.config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _save(path, dict(job_id='new', status='running', requested_stage='scan'))
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
+                FileLock(str(path) + '.lock'):
+            current = q_library_processing(contract, {})
+            self.assertEqual((current['job_id'], current['status']), ('new', 'running'))
+            w_library_processing(contract, {'action': 'pause', 'job_id': 'new'})
+            external = ProcessingControl(control_for(self.config).path)
+            self.assertEqual(external.job_id, 'new')
+            self.assertTrue(external.paused)
+            stopped = w_library_processing(contract, {'action': 'stop', 'job_id': 'new'})
+            self.assertEqual((stopped['job_id'], stopped['status']), ('new', 'stopping'))
+            external.refresh(force=True)
+            self.assertTrue(external.stopped)
+            self.assertFalse(external.paused)
+
+    def test_cancelled_web_job_observes_another_instances_completed_task(self):
+        from peach.jobs import BackgroundJob
+        from peach.library_processing import _save, state_path
+        from peach.web_library_processing import q_library_processing
+        job = BackgroundJob('library-processing')
+        job.state = dict(job_id='old', status='cancelled')
+        contract = SimpleNamespace(db_path=self.db, library_processing_job=job)
+        _save(state_path(self.config), dict(job_id='new', status='complete', scanned=8))
+        with patch('peach.web_library_processing.settings_file.active', return_value=self.config):
+            current = q_library_processing(contract, {})
+            self.assertEqual((current['job_id'], current['status'], current['scanned']), ('new', 'complete', 8))
+
     def test_new_directory_reports_counting_without_invented_time(self):
         estimate = initial_estimate(self.config, self.db, 'scan')
         self.assertIsNone(estimate['eta_seconds_min'])

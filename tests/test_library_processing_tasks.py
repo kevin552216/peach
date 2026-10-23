@@ -371,7 +371,7 @@ class SelectedProcessingTests(unittest.TestCase):
             self.assertEqual(q_library_processing(contract, {})['status'], 'paused')
             second = BackgroundJob('library-processing', runs=runs)
             contract.library_processing_job = second
-            resumed = w_library_processing(contract, dict(action='resume', job_id=state['job_id'],
+            w_library_processing(contract, dict(action='resume', job_id=state['job_id'],
                 tasks=['covers'], execution_mode='sequential', speed_mode='high'))
             second.thread.join(5)
             final = second.snapshot()

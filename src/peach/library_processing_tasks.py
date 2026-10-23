@@ -16,6 +16,7 @@ from .jobs import DiskGuard, JobPaused
 from .media_processing_policy import metadata_only
 from .processing_control import (ProcessingStopped, bind_control, checkpoint, initial_estimate,
                                  resume_fields, task_control)
+from .review_csv import read_rows, write_rows
 from .update_tasks import activity
 
 TASKS = ('scan', 'probe', 'metadata', 'covers', 'previews')
@@ -392,7 +393,7 @@ class MetadataWork:
     def __init__(self, runner):
         self.runner = runner
         self.output = runner.candidate_root / 'library-metadata-field-candidates.csv'
-        self.groups = {row['item_key']: row for row in engine.read_rows(self.output, missing_ok=True)}
+        self.groups = {row['item_key']: row for row in read_rows(self.output, missing_ok=True)}
         self.listing = runner.directory_index
         self.evidence = engine._LocalEvidenceCache(runner.config, runner.db, runner.cover_root,
             self.listing, runner.state, runner.path, include_covers=False,
@@ -427,7 +428,7 @@ class MetadataWork:
 
     def flush(self, force=False):
         if self.dirty and (force or time.monotonic() - self.saved_at >= engine.CANDIDATE_FLUSH_SECONDS):
-            engine.write_rows(self.output, engine.FIELDS, self.groups.values(), atomic=True)
+            write_rows(self.output, engine.FIELDS, self.groups.values(), atomic=True)
             self.dirty = False
             self.saved_at = time.monotonic()
         if not self.dirty:

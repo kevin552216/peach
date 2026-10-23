@@ -10,7 +10,7 @@ describe('可调整的新任务', () => {
   before(async () => { browser = await launch() });
   after(async () => { await browser?.close() });
   for (const viewport of VIEWPORTS) {
-    it(`${viewport.name}: 停止后选资料任务，再派低占用并行预览`, async () => {
+    it(`${viewport.name}: 停止后选资料任务，再派低占用就绪预览`, async () => {
       let state: Record<string, unknown> = { status: 'paused', job_id: 'old', checked: 5, total: 100, speed_mode: 'high' };
       const writes: Record<string, unknown>[] = [];
       const opened = await visit(browser, '/data-cleanup', viewport, async page => {
@@ -55,7 +55,8 @@ describe('可调整的新任务', () => {
           .getByRole('button', { name: '仅生成视频预览', exact: true }).click();
         await dialog.waitFor();
         assert.equal(await dialog.getByRole('radio', { name: '低占用', exact: true }).isChecked(), true);
-        await dialog.getByRole('radio', { name: '并行处理', exact: true }).check();
+        await dialog.getByRole('radio', { name: '就绪即处理', exact: true }).check();
+        await dialog.getByText('只补缺失项目，已有结果保留。更新清单后，逐档衔接属性与预览、资料与封面，不必等待整批前置工作。', { exact: true }).waitFor();
         await dialog.getByText('暂缓疑似重复项的预览', { exact: true }).click();
         assert.equal(await dialog.getByRole('checkbox', { name: '暂缓疑似重复项的预览', exact: true }).isChecked(), false);
         const box = await layout(page);
@@ -69,7 +70,7 @@ describe('可调整的新任务', () => {
         await dialog.getByRole('button', { name: '开始任务', exact: true }).click();
         assert.deepEqual(writes[3]?.tasks, ['previews']);
         assert.equal(writes[3]?.speed_mode, 'low');
-        assert.equal(writes[3]?.execution_mode, 'parallel');
+        assert.equal(writes[3]?.execution_mode, 'pipeline');
         assert.equal(writes[3]?.defer_suspected_duplicates, false);
         await stop();
         await settle(page);
@@ -83,7 +84,7 @@ describe('可调整的新任务', () => {
       const origin = requiredEnv('PEACH_E2E_ORIGIN');
       const response = await opened.page.request.post(`${origin}/api/library-processing`, {
         headers: { Origin: origin }, data: { stage: 'probe', tasks: ['probe'],
-          asset_ids: [Number(requiredEnv('PEACH_E2E_ITEM'))], execution_mode: 'sequential', speed_mode: 'low' },
+          asset_ids: [Number(requiredEnv('PEACH_E2E_ITEM'))], execution_mode: 'pipeline', speed_mode: 'low' },
       });
       assert.equal(response.status(), 200);
       let state = await response.json();
@@ -94,6 +95,7 @@ describe('可调整的新任务', () => {
       }
       assert.equal(state.status, 'complete', JSON.stringify(state));
       assert.deepEqual(state.requested_tasks, ['probe']);
+      assert.equal(state.execution_mode, 'pipeline');
       assert.equal(state.previews || 0, 0);
       assert.equal(state.covers || 0, 0);
     } finally { await opened.close() }

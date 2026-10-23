@@ -2,7 +2,7 @@
 
 `POST /api/library-processing` 的控制动作使用当前 `job_id`：`pause` 暂停、`resume` 继续、`stop` 停止并取消自动续跑。`GET` 返回 `stopping` 直到安全停点结束，再返回 `cancelled`。数据管理页与全站任务面共用这份状态及停止确认。
 
-新任务可提交非空 `tasks` 数组，允许 `scan`、`probe`、`metadata`、`covers`、`previews`，重复项去重，未知项拒绝；带 `asset_ids` 时不能选择 `scan`。明确的工作表决定执行内容，`stage` 只保留入口语义；缺少工作表时按既有阶段选择默认项目，`probe`、`covers` 可作独立阶段。`execution_mode` 为 `sequential`（默认）或 `parallel`，`defer_suspected_duplicates` 为布尔值；这些配置只作用于本次任务。
+新任务可提交非空 `tasks` 数组，允许 `scan`、`probe`、`metadata`、`covers`、`previews`，重复项去重，未知项拒绝；带 `asset_ids` 时不能选择 `scan`。明确的工作表决定执行内容，`stage` 只保留入口语义；缺少工作表时按既有阶段选择默认项目，`probe`、`covers` 可作独立阶段。`execution_mode` 为 `sequential`（默认）、`parallel` 或 `pipeline`（就绪即处理），`defer_suspected_duplicates` 为布尔值；这些配置只作用于本次任务。`pipeline` 在清单更新后逐档串接属性／预览和资料／封面，两条通道互不等待整批前置阶段。
 
 状态与恢复记录保存 `requested_tasks`、`execution_mode`、`defer_suspected_duplicates` 和 `speed_mode`；恢复使用原请求。`work_progress` 按工作项返回 `status`、`done`、`total`、`failed`、`deferred`，状态为 `pending`、`running`、`complete`、`failed` 或 `cancelled`。`deferred_asset_ids` 列出暂缓预览的 `asset_id` 和原因，其判断只表示疑似。
 

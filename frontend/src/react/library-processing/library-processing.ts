@@ -25,7 +25,7 @@ export interface LibraryProcessingIssue {
 /** 一趟扫描与采集的快照。字段以 `q_library_processing`（`src/peach/web_library_processing.py`）为准。 */
 export interface LibraryProcessingData {
   requested_tasks?: ProcessingTask[];
-  execution_mode?: 'sequential' | 'parallel';
+  execution_mode?: 'sequential' | 'parallel' | 'pipeline';
   defer_suspected_duplicates?: boolean;
   work_progress?: Partial<Record<ProcessingTask, { status: string; done: number; total: number; failed: number; deferred: number }>>;
   metadata_only?: boolean;
@@ -81,7 +81,7 @@ export type ProcessingTask = 'scan' | 'probe' | 'metadata' | 'covers' | 'preview
 export interface LibraryProcessingCommand {
   stage?: 'scan' | 'collect' | 'previews' | 'metadata' | 'probe' | 'covers';
   tasks?: ProcessingTask[];
-  execution_mode?: 'sequential' | 'parallel';
+  execution_mode?: 'sequential' | 'parallel' | 'pipeline';
   defer_suspected_duplicates?: boolean;
   asset_ids?: number[];
   job_id?: string;

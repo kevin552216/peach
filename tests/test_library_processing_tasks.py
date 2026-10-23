@@ -234,7 +234,7 @@ class SelectedProcessingTests(unittest.TestCase):
             entered.set()
             release.wait(5)
             return dict(status='complete')
-        request = dict(stage='all', tasks=['probe', 'metadata'], speed_mode='low', execution_mode='parallel',
+        request = dict(stage='all', tasks=['probe', 'metadata'], speed_mode='low', execution_mode='pipeline',
                        defer_suspected_duplicates=True)
         with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
                 patch('peach.web_library_processing.process_library', side_effect=work):
@@ -437,3 +437,182 @@ class SelectedProcessingTests(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as connection:
             self.assertEqual(connection.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
         self.assertEqual(len(self.rows()), 1)
+
+    def test_ready_pipeline_previews_each_asset_before_probing_the_next(self):
+        self.seed(count=2)
+        events, snapshots = [], []
+        def probe(_config, db, _locations, _roots, asset_ids, update, **options):
+            self.assertEqual(len(asset_ids), 1)
+            identity = asset_ids[0]
+            events.append(('probe', identity))
+            with closing(sqlite3.connect(db)) as connection, connection:
+                connection.execute('UPDATE asset SET duration=123 WHERE id=?', [identity])
+            update(probed=options['initial_probed'] + 1)
+        def preview(_config, rows, *_args, **_options):
+            self.assertEqual(rows[0]['duration'], 123)
+            events.append(('preview', rows[0]['id']))
+        with patch('peach.library_processing._probe_sources', side_effect=probe), \
+                patch('peach.library_processing._generate_previews', side_effect=preview):
+            result = self.run_selected(['probe', 'previews'], execution_mode='pipeline', report=snapshots.append)
+        self.assertEqual(result['status'], 'complete', result)
+        self.assertEqual(events, [('probe', 1), ('preview', 1), ('probe', 2), ('preview', 2)])
+        self.assertEqual(result['probed'], 2)
+        self.assertEqual(result['work_progress']['probe']['done'], 2)
+        self.assertTrue(any(state['work_progress']['probe']['done'] == 1
+            and state['work_progress']['previews']['done'] == 1 for state in snapshots))
+
+    def test_ready_pipeline_hands_metadata_to_covers_per_asset(self):
+        from peach.library_processing_tasks import MetadataWork
+        self.seed(count=2, duration=30)
+        events = []
+        original = MetadataWork.run_ready
+        def metadata(work, row):
+            events.append(('metadata', row['id']))
+            original(work, row)
+        def covers(runner, rows):
+            self.assertEqual(rows[0]['catalog_title'], '来源标题')
+            events.append(('covers', rows[0]['id']))
+        with patch.object(MetadataWork, 'run_ready', metadata), \
+                patch('peach.library_processing_tasks.SelectedProcessing.do_covers', covers):
+            result = self.run_selected(['metadata', 'covers'], execution_mode='pipeline')
+        self.assertEqual(result['status'], 'complete', result)
+        self.assertEqual(events, [('metadata', 1), ('covers', 1), ('metadata', 2), ('covers', 2)])
+        self.assertEqual(len(result['completed_metadata']), 2)
+
+    def test_ready_pipeline_accumulates_suspected_preview_deferrals(self):
+        self.seed(count=3, duration=120)
+        received = []
+        def preview(_config, rows, *_args, **_options):
+            received.extend(row['id'] for row in rows)
+        with patch('peach.library_processing._generate_previews', side_effect=preview):
+            result = self.run_selected(['previews'], execution_mode='pipeline', defer_suspected_duplicates=True)
+        self.assertEqual(result['status'], 'complete', result)
+        self.assertEqual(received, [1])
+        self.assertEqual([item['asset_id'] for item in result['deferred_asset_ids']], [2, 3])
+        self.assertEqual(result['work_progress']['previews'],
+            dict(status='complete', done=3, total=3, failed=0, deferred=2))
+
+    def test_ready_pipeline_pause_blocks_the_next_asset_then_resumes(self):
+        self.seed(count=2, duration=30)
+        entered, advance, paused = (threading.Event() for _ in range(3))
+        events, results = [], []
+        def probe(_runner, rows):
+            events.append(('probe', rows[0]['id']))
+        def preview(_runner, rows):
+            events.append(('preview', rows[0]['id']))
+            entered.set()
+            self.assertTrue(advance.wait(5))
+            checkpoint()
+        def report(state):
+            if state['status'] == 'paused':
+                paused.set()
+        with patch('peach.library_processing_tasks.SelectedProcessing.do_probe', probe), \
+                patch('peach.library_processing_tasks.SelectedProcessing.do_previews', preview):
+            thread = threading.Thread(target=lambda: results.append(self.run_selected(
+                ['probe', 'previews'], execution_mode='pipeline', job_id='ready-pause', report=report)))
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                control_for(self.config).request('pause', 'ready-pause')
+                advance.set()
+                self.assertTrue(paused.wait(3))
+                self.assertEqual(events, [('probe', 1), ('preview', 1)])
+                control_for(self.config).request('resume', 'ready-pause')
+            finally:
+                advance.set()
+                control_for(self.config).request('resume', 'ready-pause')
+                thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0]['status'], 'complete', results)
+        self.assertEqual(events[-2:], [('probe', 2), ('preview', 2)])
+
+    def test_ready_pipeline_stop_joins_inflight_work_and_keeps_metadata(self):
+        self.seed(count=2, duration=30)
+        entered, advance, saved = (threading.Event() for _ in range(3))
+        calls, results = [], []
+        def preview(_runner, rows):
+            calls.append(rows[0]['id'])
+            entered.set()
+            self.assertTrue(advance.wait(5))
+            checkpoint()
+        def report(state):
+            if state['auto_applied']:
+                saved.set()
+        with patch('peach.library_processing_tasks.SelectedProcessing.do_previews', preview):
+            thread = threading.Thread(target=lambda: results.append(self.run_selected(
+                ['metadata', 'previews'], execution_mode='pipeline', job_id='ready-stop', report=report)))
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                self.assertTrue(saved.wait(3))
+                control_for(self.config).request('stop', 'ready-stop')
+                self.assertTrue(thread.is_alive())
+            finally:
+                advance.set()
+                thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0]['status'], 'cancelled', results)
+        self.assertEqual(calls, [1])
+        self.assertEqual(self.rows()[0]['catalog_title'], '来源标题')
+        following = self.run_selected(['metadata'], execution_mode='pipeline')
+        self.assertEqual(following['status'], 'complete', following)
+
+    def test_ready_pipeline_submits_only_two_bounded_lanes(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.seed(count=100, duration=30)
+        pools = []
+        def create_pool(*args, **kwargs):
+            pool = ThreadPoolExecutor(*args, **kwargs)
+            pool.submit = Mock(wraps=pool.submit)
+            pools.append(pool)
+            return pool
+        with patch('peach.library_processing_tasks.ThreadPoolExecutor', side_effect=create_pool), \
+                patch('peach.library_processing_tasks.MetadataWork.run_ready'), \
+                patch('peach.library_processing_tasks.SelectedProcessing.do_previews'):
+            result = self.run_selected(['metadata', 'previews'], execution_mode='pipeline')
+        self.assertEqual(result['status'], 'complete', result)
+        self.assertEqual(len(pools), 1)
+        self.assertEqual(pools[0].submit.call_count, 2)
+
+    def test_ready_pipeline_row_lookup_failure_is_not_a_successful_job(self):
+        self.seed(duration=30)
+        with patch('peach.library_processing_tasks.SelectedProcessing.current_rows', side_effect=OSError('无法读取当前资产')):
+            result = self.run_selected(['probe'], execution_mode='pipeline')
+        self.assertEqual(result['status'], 'failed', result)
+        self.assertIn('无法读取当前资产', result['error'])
+        self.assertEqual(result['work_progress']['probe']['status'], 'failed')
+
+    def test_ready_pipeline_can_stop_while_skipping_an_unavailable_asset(self):
+        self.seed(count=2, duration=30)
+        calls = []
+        def missing(_runner, asset_ids=None):
+            calls.append(asset_ids)
+            control_for(self.config).request('stop', 'missing-stop')
+            return []
+        with patch('peach.library_processing_tasks.SelectedProcessing.current_rows', missing):
+            result = self.run_selected(['probe'], execution_mode='pipeline', job_id='missing-stop')
+        self.assertEqual(result['status'], 'cancelled', result)
+        self.assertEqual(calls, [[1]])
+        self.assertEqual(result['work_progress']['probe']['failed'], 0)
+
+    def test_ready_pipeline_lookup_failure_immediately_releases_the_other_lane(self):
+        from peach.library_processing_tasks import SelectedProcessing
+        self.seed(duration=30)
+        entered, released = threading.Event(), threading.Event()
+        original = SelectedProcessing.current_rows
+        def lookup(runner, asset_ids=None):
+            if runner.local.task == 'previews':
+                self.assertTrue(entered.wait(3))
+                raise OSError('当前资产读取失败')
+            return original(runner, asset_ids)
+        def metadata(work, row):
+            entered.set()
+            self.assertTrue(work.runner.cancel.wait(2), '媒体通道失败必须即时通知网络通道')
+            released.set()
+            work.runner.update()
+        with patch.object(SelectedProcessing, 'current_rows', lookup), \
+                patch('peach.library_processing_tasks.MetadataWork.run_ready', metadata):
+            result = self.run_selected(['metadata', 'previews'], execution_mode='pipeline')
+        self.assertEqual(result['status'], 'failed', result)
+        self.assertIn('当前资产读取失败', result['error'])
+        self.assertTrue(released.is_set())

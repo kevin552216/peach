@@ -31,7 +31,7 @@ def selection_for(config, stage, tasks, asset_ids, execution_mode='sequential', 
     """校验本次工作范围；未指定工作项的既有入口继续使用阶段契约。"""
     if stage not in DEFAULTS:
         raise ValueError('处理阶段无效')
-    if execution_mode not in ('sequential', 'parallel'):
+    if execution_mode not in ('sequential', 'parallel', 'pipeline'):
         raise ValueError('执行方式无效')
     if type(defer_suspected_duplicates) is not bool:
         raise ValueError('暂缓疑似重复项目选项无效')
@@ -121,6 +121,9 @@ class SelectedProcessing:
     def publish(self, **values):
         """仅发布已经保存的进度；持久快照在同一把锁内复制。"""
         with self.lock:
+            task = getattr(self.local, 'task', None)
+            if getattr(self.local, 'pipeline', False) and task in self.local.unit_done:
+                values.update(checked=self.local.unit_done[task], total=len(self.rows))
             resume_fields(self.state, values)
             self.state.update(values)
             self.state['speed_mode'] = self.control.mode if self.control else self.mode
@@ -192,13 +195,16 @@ class SelectedProcessing:
                     step['status'] = 'current' if status == 'running' else status
             self.publish()
 
-    def run_task(self, task):
+    def run_task(self, task, row=None):
         self.local.task = task
         try:
             self.task_state(task, 'running')
             self.update(stage=LABELS[task], checked=0, total=len(self.rows))
-            getattr(self, 'do_' + task)()
-            self.task_state(task, 'complete')
+            if row is None:
+                getattr(self, 'do_' + task)()
+                self.task_state(task, 'complete')
+            else:
+                getattr(self, 'do_' + task)([row])
         except Exception as error:
             with self.lock:
                 self.errors.append(error)
@@ -261,13 +267,20 @@ class SelectedProcessing:
             return
         network = [task for task in ('metadata', 'covers') if task in self.tasks]
         media = [task for task in ('probe', 'previews') if task in self.tasks]
+        lane_work = self.pipeline_lane if self.selection['execution_mode'] == 'pipeline' else self.lane
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix='PeachSelectedWork') as executor:
-            futures = [executor.submit(copy_context().run, self.lane, lane) for lane in (network, media) if lane]
+            futures = [executor.submit(copy_context().run, lane_work, lane) for lane in (network, media) if lane]
             for future in futures:
                 try:
                     future.result()
-                except Exception:
-                    self.cancel.set()
+                except Exception as error:
+                    self.abort_lane(error)
+
+    def abort_lane(self, error):
+        with self.lock:
+            if not any(saved is error for saved in self.errors):
+                self.errors.append(error)
+        self.cancel.set()
 
     def finish_metadata_policy(self):
         """阶段入口保留既有字段复核和人物后继；显式工作表只执行选中的项目。"""
@@ -288,6 +301,33 @@ class SelectedProcessing:
             if self.cancel.is_set():
                 return
             self.run_task(task)
+
+    def pipeline_lane(self, tasks):
+        """逐档交接同一通道的前置结果，每条通道最多持有一个在途项目。"""
+        self.local.pipeline = True
+        self.local.unit_done = dict.fromkeys(tasks, 0)
+        self.local.preview_seen = set()
+        try:
+            for item in self.rows:
+                for task in tasks:
+                    if self.cancel.is_set():
+                        return
+                    self.local.task = task
+                    self.update(stage=LABELS[task])
+                    rows = self.current_rows([item['id']])
+                    if rows:
+                        self.run_task(task, rows[0])
+                    self.local.unit_done[task] += 1
+                    self.publish()
+            for task in tasks:
+                self.task_state(task, 'complete')
+        except Exception as error:
+            self.abort_lane(error)
+            raise
+        finally:
+            if 'metadata' in tasks and getattr(self, 'metadata', None) is not None:
+                self.metadata.flush(force=True)
+            self.local.pipeline = False
 
     def settle_interruption(self, error):
         if isinstance(error, JobPaused):
@@ -317,8 +357,9 @@ class SelectedProcessing:
             save_checkpoint=lambda: self.flush(force=True))
         self.publish(scanned=scanned.scanned, scanned_bytes=scanned.scanned_bytes)
 
-    def do_probe(self):
-        engine._probe_sources(self.config, self.db, self.locations, self.roots, self.scope, self.update,
+    def do_probe(self, rows=None):
+        scope = self.scope if rows is None else [row['id'] for row in rows]
+        engine._probe_sources(self.config, self.db, self.locations, self.roots, scope, self.update,
                               initial_probed=self.state['probed'])
 
     def get_remote(self):
@@ -328,13 +369,17 @@ class SelectedProcessing:
                 routes=engine.metadata_routes.parse_route_overrides(self.options.get('route_overrides')))
         return self.remote
 
-    def do_metadata(self):
-        self.metadata = MetadataWork(self)
-        self.metadata.run()
+    def do_metadata(self, rows=None):
+        if getattr(self, 'metadata', None) is None:
+            self.metadata = MetadataWork(self)
+        if rows is None:
+            self.metadata.run()
+        else:
+            self.metadata.run_ready(rows[0])
 
-    def do_covers(self):
+    def do_covers(self, rows=None):
         listing, jobs = self.directory_index, []
-        rows = self.current_rows()
+        rows = self.current_rows() if rows is None else rows
         for row in rows:
             self.update(current_asset_id=row['id'], current_asset_name=row['name'])
             code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
@@ -351,12 +396,13 @@ class SelectedProcessing:
             self.covered.append((row['id'], covers))
             self.publish(covers=self.state['covers'] + covers, checked=index + 1)
 
-    def current_rows(self):
-        rows, _ = engine._collection_rows(self.db, locations=self.locations, online_roots=self.roots, asset_ids=self.scope)
+    def current_rows(self, asset_ids=None):
+        rows, _ = engine._collection_rows(self.db, locations=self.locations, online_roots=self.roots,
+            asset_ids=self.scope if asset_ids is None else asset_ids)
         return rows
 
-    def do_previews(self):
-        rows = self.preview_rows(self.current_rows())
+    def do_previews(self, rows=None):
+        rows = self.preview_rows(self.current_rows() if rows is None else rows)
         engine._generate_previews(self.config, rows, self.database, update=self.update, issue=self.issue, guard=self.guard(),
             completed=self.checkpoints.completed['completed_previews'], initial_made=self.state['previews'],
             checkpoint=lambda row: self.checkpoints.mark('completed_previews', row, self.flush))
@@ -364,7 +410,10 @@ class SelectedProcessing:
     def preview_rows(self, rows):
         if not self.selection['defer_suspected_duplicates']:
             return rows
-        seen, chosen, deferred = set(), [], []
+        streaming = getattr(self.local, 'pipeline', False)
+        seen = self.local.preview_seen if streaming else set()
+        chosen = []
+        deferred = list(self.state['deferred_asset_ids']) if streaming else []
         for row in rows:
             code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             duration, size = row.get('duration'), row.get('size')
@@ -465,20 +514,37 @@ class MetadataWork:
                     prepared.append(local)
                 runner.publish(checked=index + 1)
             self.flush(force=True)
-            for index, (row, code, fields, entries, verify_existing, local_ok) in enumerate(prepared):
+            for index, local in enumerate(prepared):
+                row = local[0]
                 runner.update(stage='采集缺失资料', checked=index, total=len(prepared),
                               current_asset_id=row['id'], current_asset_name=row['name'])
-                issues = runner.state['work_progress']['metadata']['failed']
-                missing = list(engine.COLLECTED_FIELDS) if verify_existing else engine._missing_fields(row, fields)
-                found, _ = runner.get_remote().collect(row, code, missing, runner.cover_root,
-                    update=runner.update, issue=runner.issue, include_covers=False,
-                    answered=() if verify_existing else engine._answered_sources(self.groups, f"asset:{row['id']}", missing),
-                    received=lambda entries, row=row, code=code, fields=fields, verify=verify_existing:
-                        self.publish(row, code, fields, entries, verify))
-                with runner.lock:
-                    runner.checkpoints.queue_metadata(row, entries + found if local_ok else [], issues,
-                        issue_count=runner.state['work_progress']['metadata']['failed'])
-                self.flush()
+                self.collect(local)
                 runner.publish(checked=index + 1, candidates=len(engine._candidate_scope(self.groups, runner.scope)))
         finally:
             self.flush(force=True)
+
+    def run_ready(self, row):
+        """本档资料就绪即交接封面，候选仍按既有节流与检查点持久保存。"""
+        runner = self.runner
+        if not list(runner.checkpoints.remaining_metadata([row])):
+            return
+        runner.update(stage='检查配套文件', current_asset_id=row['id'], current_asset_name=row['name'])
+        prepared = self.local(row)
+        if prepared is not None:
+            runner.update(stage='采集缺失资料')
+            self.collect(prepared)
+        runner.publish(candidates=len(engine._candidate_scope(self.groups, runner.scope)))
+
+    def collect(self, prepared):
+        runner = self.runner
+        row, code, fields, entries, verify_existing, local_ok = prepared
+        issues = runner.state['work_progress']['metadata']['failed']
+        missing = list(engine.COLLECTED_FIELDS) if verify_existing else engine._missing_fields(row, fields)
+        found, _ = runner.get_remote().collect(row, code, missing, runner.cover_root,
+            update=runner.update, issue=runner.issue, include_covers=False,
+            answered=() if verify_existing else engine._answered_sources(self.groups, f"asset:{row['id']}", missing),
+            received=lambda entries: self.publish(row, code, fields, entries, verify_existing))
+        with runner.lock:
+            runner.checkpoints.queue_metadata(row, entries + found if local_ok else [], issues,
+                issue_count=runner.state['work_progress']['metadata']['failed'])
+        self.flush()

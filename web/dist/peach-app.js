@@ -45522,32 +45522,36 @@ function CSe(e, t) {
 	}
 }
 function wSe(e, { scan: t, metadataOnly: n, speedMode: r, onRun: i }) {
-	let a = CSe(e, t).filter((e) => !(n && e === "previews")), o = Object.keys(gF).filter((e) => t || e !== "scan").map((e) => `<label class="pickrow">${Vo(`name="processing-task" value="${e}" ${a.includes(e) ? "checked" : ""} ${n && e === "previews" ? "disabled" : ""}`)}<span class="pickrowtext"><b>${gF[e]}</b></span></label>`).join(""), s = e.stage === "previews" ? "low" : r, c = Us({
+	let a = CSe(e, t).filter((e) => !(n && e === "previews")), o = Object.keys(gF).filter((e) => t || e !== "scan").map((e) => `<label class="pickrow">${Vo(`name="processing-task" value="${e}" ${a.includes(e) ? "checked" : ""} ${n && e === "previews" ? "disabled" : ""}`)}<span class="pickrowtext"><b>${gF[e]}</b></span></label>`).join(""), s = e.stage === "previews" ? "low" : r, c = "只补缺失项目，已有结果保留。预览可稍后另派低占用任务；同时处理可能让电脑变慢。", l = Us({
 		title: "新任务",
 		confirmLabel: "开始任务",
-		description: "只补缺失项目，已有结果保留。预览可稍后另派低占用任务；同时处理可能让电脑变慢。",
-		body: `<div class="modalfield"><span>本次处理项目</span>${o}</div>` + (n ? "<p>视频预览生成已在媒体库设置中关闭。</p>" : "") + Fs("processing-execution", "执行方式", [["sequential", "依序处理"], ["parallel", "并行处理"]], "sequential", { text: !0 }) + `<div data-defer-previews hidden><label class="pickrow">${Vo("name=\"processing-defer\" checked")}<span class="pickrowtext"><b>暂缓疑似重复项的预览</b></span></label></div>` + Fs("processing-speed", "处理模式", [
+		description: c,
+		body: `<div class="modalfield"><span>本次处理项目</span>${o}</div>` + (n ? "<p>视频预览生成已在媒体库设置中关闭。</p>" : "") + Fs("processing-execution", "执行方式", [
+			["sequential", "依序处理"],
+			["parallel", "并行处理"],
+			["pipeline", "就绪即处理"]
+		], "sequential", { text: !0 }) + `<div data-defer-previews hidden><label class="pickrow">${Vo("name=\"processing-defer\" checked")}<span class="pickrowtext"><b>暂缓疑似重复项的预览</b></span></label></div>` + Fs("processing-speed", "处理模式", [
 			["low", "低占用"],
 			["standard", "标准"],
 			["high", "全速"]
 		], s, { text: !0 }),
 		onConfirm: async () => {
-			let t = [...c.dialog.querySelectorAll("input[name=\"processing-task\"]:checked")].map((e) => e.value);
+			let t = [...l.dialog.querySelectorAll("input[name=\"processing-task\"]:checked")].map((e) => e.value);
 			if (!t.length) throw Error("请至少选择一项工作");
-			let n = (e) => c.dialog.querySelector(`input[name="${e}"]:checked`)?.value, r = n("processing-execution") === "parallel" ? "parallel" : "sequential", a = n("processing-speed");
+			let n = (e) => l.dialog.querySelector(`input[name="${e}"]:checked`)?.value, r = n("processing-execution"), a = r === "pipeline" ? "pipeline" : r === "parallel" ? "parallel" : "sequential", o = n("processing-speed");
 			await i({
 				...e,
 				tasks: t,
-				execution_mode: r,
-				defer_suspected_duplicates: r === "parallel" && t.includes("previews") && !!c.dialog.querySelector("input[name=\"processing-defer\"]")?.checked,
-				speed_mode: a === "low" ? "low" : a === "high" ? "high" : "standard"
+				execution_mode: a,
+				defer_suspected_duplicates: a !== "sequential" && t.includes("previews") && !!l.dialog.querySelector("input[name=\"processing-defer\"]")?.checked,
+				speed_mode: o === "low" ? "low" : o === "high" ? "high" : "standard"
 			});
 		}
 	});
-	return c.dialog.addEventListener("change", () => {
-		let e = !!c.dialog.querySelector("input[name=\"processing-execution\"][value=\"parallel\"]")?.checked, t = !!c.dialog.querySelector("input[name=\"processing-task\"][value=\"previews\"]")?.checked;
-		c.dialog.querySelector("[data-defer-previews]").hidden = !e || !t;
-	}), c;
+	return l.dialog.addEventListener("change", () => {
+		let e = l.dialog.querySelector("input[name=\"processing-execution\"]:checked")?.value, t = e === "parallel" || e === "pipeline", n = !!l.dialog.querySelector("input[name=\"processing-task\"][value=\"previews\"]")?.checked;
+		l.dialog.querySelector("[data-defer-previews]").hidden = !t || !n, l.dialog.querySelector(".ui-geist-modal-body > p").textContent = e === "pipeline" ? "只补缺失项目，已有结果保留。更新清单后，逐档衔接属性与预览、资料与封面，不必等待整批前置工作。" : c;
+	}), l;
 }
 //#endregion
 //#region src/react/library-processing/processing-line.tsx

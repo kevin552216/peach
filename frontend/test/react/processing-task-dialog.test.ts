@@ -37,6 +37,17 @@ it('不同新任务的表单各有自己的选择', async () => {
   expect(chosen(next.dialog)).toEqual(['probe']);
 });
 
+it('就绪即处理保留预览暂缓选择并明确逐档交接', async () => {
+  const onRun = vi.fn();
+  const form = processingTaskDialog({ stage: 'previews' }, options(onRun));
+  await click(form.dialog.querySelector('input[value="pipeline"]'));
+  expect(form.dialog.textContent).toContain('逐档衔接属性与预览、资料与封面');
+  expect(form.dialog.querySelector<HTMLElement>('[data-defer-previews]')?.hidden).toBe(false);
+  await submit(form.dialog.querySelector('form'));
+  expect(onRun).toHaveBeenCalledWith({ stage: 'previews', tasks: ['previews'], speed_mode: 'low',
+    execution_mode: 'pipeline', defer_suspected_duplicates: true });
+});
+
 it('未选工作时留在表单，选择一项后可提交', async () => {
   const onRun = vi.fn();
   const form = processingTaskDialog({ stage: 'probe' }, options(onRun));

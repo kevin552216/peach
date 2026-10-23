@@ -50,6 +50,8 @@ Scanning, follow updates and new-release metadata collection save their progress
 
 New tasks can select file scanning, media properties, metadata, covers and previews, filling only missing results. Properties and metadata are selected first; covers and previews can run as separate low-resource tasks. Choose sequential execution or parallel network and media work.
 
+The ready-work mode hands each file's properties directly to its preview work, and its metadata to its cover work, after the file list is updated. Network and media lanes proceed independently, retaining resource limits, preview deferral and stop controls.
+
 The combined "Send version statistics and error diagnostics (recommended)" option is checked by default. Clear it during installation, first setup or in settings to disable both. Saved opt-out choices are preserved. While enabled, it sends the listed technical fields to Sentry; full logs, diagnostic ZIPs, media details and watch history are excluded. See [remote diagnostics](docs/DIAGNOSTICS.md#可选远程诊断).
 
 Sharing library and taste details is a separate option in the installer and settings, off by default. Review the complete fields and local preview before explicitly consenting to weekly snapshots of works, tags, ratings, viewing summaries and every preference dimension. Account, device and installation identifiers are excluded. Detailed snapshots can still be linked or re-identified, and the receiving service can see the connection IP. See the [diagnostics reference](docs/DIAGNOSTICS.md#馆藏与口味群体研究).

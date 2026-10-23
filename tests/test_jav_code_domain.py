@@ -168,6 +168,30 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(release_code_from_text("FC2-PPV-2909046"), "FC2-PPV-2909046")
         self.assertEqual(release_code_from_text("fc2802296"), "FC2-PPV-802296")
 
+    def test_fc2_filenames_with_labels_titles_and_parts(self):
+        for name in (
+            "+++ FC2-PPV-1234567 中文片名_2.mp4",
+            "+++ FC2-PPV-1234567 日本語のタイトル！_1.mkv",
+            "[JAV] [Uncensored] FC2-PPV-1234567 中文片名.mp4",
+            "FC2-1234567中文片名.mp4",
+            "fc2_ppv_1234567 日本語のタイトル.mp4",
+            "FC-1234567 中文片名.mp4",
+            "+++ FC2-PPV-1234567-C.mp4",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(release_code_from_filename(name), "FC2-PPV-1234567")
+
+    def test_fc2_filename_requires_a_leading_release_identifier(self):
+        for name in (
+            "旅行日記 FC2-PPV-1234567.mp4",
+            "NOTFC2-PPV-1234567 中文片名.mp4",
+            "+++ FC2-PPV-1234 中文片名.mp4",
+            "+++ FC2-PPV- 中文片名.mp4",
+            "+++ FC2-Selected collection-2.mp4",
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(release_code_from_filename(name))
+
     def test_the_fc_dash_short_form_is_an_fc2_id(self):
         """合集包把 FC2 写成 `FC-<商品号>`，认不出就没有番号，整条 FC2 来源链一家都不问。"""
         for name in ("FC-2052614-1.mp4", "FC-2052614_1.mp4", "FC-2052614.mp4",

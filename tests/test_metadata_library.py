@@ -1569,7 +1569,7 @@ class LibraryNfoTests(unittest.TestCase):
         """r18.dev 没有 FC2，问一次就是白等一次主机间隔；发行方自己那一页才有这批番号。"""
         media = self.root / 'media'
         media.mkdir()
-        for name in ('FC2-PPV-1239052.mp4', 'ABW-001.mp4'):
+        for name in ('+++ FC2-PPV-1239052 中文片名_2.mp4', 'ABW-001.mp4'):
             (media / name).write_bytes(b'video')
         db = fresh_ledger(self.root)
         config = PeachConfig(self.root, self.root / 'config.toml', present=True, locations={'local': (str(media),)})
@@ -1590,6 +1590,10 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertEqual(sorted(item.args[0] for item in provider.cover.call_args_list),
                          ['ABW-001', 'FC2-PPV-1239052'])
         self.assertEqual(result['issue_count'], 0)
+        with closing(sqlite3.connect(db)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT code FROM asset WHERE name LIKE '+++ FC2%'").fetchone()[0],
+                'FC2-PPV-1239052')
         rows = {(row['code'], row['field']): row
                 for row in read_rows(self.root / 'generated/library-metadata-field-candidates.csv')}
         title = json.loads(rows[('FC2-PPV-1239052', 'title')]['candidates_json'])
@@ -1597,6 +1601,30 @@ class LibraryNfoTests(unittest.TestCase):
                          [('fc2', 'fc2-article', 'official', True)])
         self.assertEqual(json.loads(rows[('FC2-PPV-1239052', 'studio')]['candidates_json'])[0]['value'],
                          'FC2-PPV')
+
+    @windows_ledger_roots
+    def test_custom_filename_rule_registers_the_code_and_enters_the_fc2_chain(self):
+        from peach.filename_rules import save
+        media = self.root / 'media'
+        media.mkdir()
+        (media / '我的命名_1239052 片名.mp4').write_bytes(b'video')
+        db = fresh_ledger(self.root)
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True,
+                             locations={'local': (str(media),)})
+        provider = stub_provider()
+        provider.fc2.return_value = [('fc2', dict(id='FC2-PPV-1239052', title='测试标题', maker='FC2-PPV'))]
+        provider.cover.return_value = False
+        first = process_library(config, db, self.root / 'generated', self.root / 'covers',
+                                provider_factory=lambda: provider)
+        provider.fc2.assert_not_called()
+        save(config.directory('state'), [dict(name='我的 FC2', pattern=r'我的命名_(\d+)',
+                                            replacement=r'FC2-PPV-\1', enabled=True)])
+        result = process_library(config, db, self.root / 'generated', self.root / 'covers',
+                                 provider_factory=lambda: provider, resume_state=first)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual([item.args[0] for item in provider.fc2.call_args_list], ['FC2-PPV-1239052'])
+        with closing(sqlite3.connect(db)) as connection:
+            self.assertEqual(connection.execute('SELECT code FROM asset').fetchone()[0], 'FC2-PPV-1239052')
 
     @windows_ledger_roots
     def test_a_dated_code_asks_1pondo_only_when_this_file_says_it_is_theirs(self):

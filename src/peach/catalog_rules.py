@@ -320,7 +320,11 @@ _WESTERN_TOKEN_SEP = re.compile(r"[\s_@\[\]【】()（）]+")
 #: FC2 商品号。`FC-2052614` 是合集包常见的短写法（`B:\MVP\FC2-Selected collection-2`
 #: 下 97 个文件是这种写法），`FC` 与数字之间必须有分隔符：连写的 `FC2052614`
 #: 分不清是哪一种，仍按 `FC2` 连写读。
-_FC2_ID = re.compile(r"^(?:FC2(?:[-_. ]?PPV)?[-_. ]?|FC[-_])(\d{5,})$", re.I)
+_FC2_NUMBER = r"(?:FC2(?:[-_. ]?PPV)?[-_. ]?|FC[-_])(\d{5,})"
+_FC2_ID = re.compile(rf"^{_FC2_NUMBER}$", re.I)
+#: 文件名开头允许排序加号与发行类别标签，商品号之后可以紧接片名与分卷。
+_FC2_FILENAME_HEAD = re.compile(
+    rf"^(?:(?:\++|\[(?:JAV|Uncensored)\])\s*)*({_FC2_NUMBER})", re.I)
 
 #: 能证明「这是一次公开发行」的实体类型。`tag` 不在其中：口味标签谁都能挂，
 #: 挂上了不代表这条记录对应某个发行物。
@@ -773,6 +777,9 @@ def release_code_from_filename(name: str | None) -> str | None:
     stem = _ASSET_EXTENSION.sub("", str(name or "").strip())
     if western_release_identity(stem):
         return None
+    fc2 = _FC2_FILENAME_HEAD.match(strip_promo_markers(stem))
+    if fc2:
+        return release_code_from_text(fc2.group(1))
     partless = _ASSET_EXTENSION.sub("", _PART_MARKER.sub("", str(name or "").strip()))
     stripped = _FILE_NOISE.sub("", strip_promo_markers(partless))
     code = release_code_from_text(stem) or (

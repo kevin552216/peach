@@ -1158,7 +1158,9 @@ def _answered_sources(groups, target_key, fields):
 class _DirectoryIndex:
     """本趟任务内每个文件夹只列一次，交错处理的目录共享同一份索引。"""
 
-    def __init__(self):
+    def __init__(self, code_from_filename=release_code_from_filename, rule_key=''):
+        self.code_from_filename = code_from_filename
+        self.rule_key = rule_key
         self._cache: dict[str, dict[str, Path]] = {}
         self._sidecars: dict[str, SidecarIndex] = {}
 
@@ -1172,7 +1174,7 @@ class _DirectoryIndex:
     def sidecars(self, video):
         key = str(video.parent)
         if key not in self._sidecars:
-            self._sidecars[key] = SidecarIndex(self.files(video.parent))
+            self._sidecars[key] = SidecarIndex(self.files(video.parent), self.code_from_filename)
         return self._sidecars[key].for_video(video)
 
 
@@ -2074,7 +2076,7 @@ def _read_local_metadata(config, db_path, row, cover_root, listing, state, updat
     if video.name.casefold() not in files:
         issue(row, '媒体文件不可访问', action='reading_local', retryable=True)
         return None
-    code = _provider_code(row['code']) or release_code_from_filename(row['name'])
+    code = _provider_code(row['code']) or listing.code_from_filename(row['name'])
     payload = None
     entries = []
     nfo, posters = listing.sidecars(video)
@@ -2178,7 +2180,7 @@ class _LocalEvidenceCache:
             cached = json.loads(Path(cached_path).read_text(encoding='utf-8')) if cached_path else None
         except (OSError, ValueError):
             cached = None
-        if cached is not None:
+        if cached is not None and cached.get('filename_rules', '') == self.listing.rule_key:
             code, verify, payload, entries = cached['local']
             poster_jobs.extend((row, Path(source), name, Path(target))
                                for source, name, target in cached['posters'])
@@ -2188,7 +2190,8 @@ class _LocalEvidenceCache:
                                      self.state, update, issue, poster_jobs)
         if local is not None and self.state['issue_count'] == issues_before:
             code, verify, payload, entries = local
-            record = dict(local=[code, verify, payload, [(source, document, str(path)) for source, document, path in entries]],
+            record = dict(filename_rules=self.listing.rule_key,
+                          local=[code, verify, payload, [(source, document, str(path)) for source, document, path in entries]],
                           posters=[(str(source), name, str(target)) for _, source, name, target in poster_jobs[offset:]])
             encoded = json.dumps(record, ensure_ascii=False)
             digest = hashlib.sha256(encoded.encode()).hexdigest()
@@ -2348,7 +2351,9 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             output = candidate_root / 'library-metadata-field-candidates.csv'
             groups = {row['item_key']: row for row in read_rows(output, missing_ok=True)}
             scoped_groups = lambda: _candidate_scope(groups, scope_ids)
-            listing = _DirectoryIndex()
+            from .filename_rules import Engine, load as load_filename_rules
+            engine = Engine(load_filename_rules(config.directory('state')))
+            listing = _DirectoryIndex(engine.code, engine.fingerprint)
             local_evidence = _LocalEvidenceCache(config, db_path, cover_root, listing, state, path)
             csv_dirty = False
             csv_written_at = time.monotonic()

@@ -110,10 +110,10 @@ const PILL = 'h-7.5 cursor-pointer rounded-full border border-(--glass-low) bg-t
   + ' aria-busy:cursor-wait aria-busy:opacity-55';
 
 export function GlassPill(
-  { children, onPress, busy = false }: { children: ReactNode; onPress(): void; busy?: boolean },
+  { children, onPress, busy = false, selected }: { children: ReactNode; onPress(): void; busy?: boolean; selected?: boolean },
 ) {
   return (
-    <button type="button" data-glass-pill="" className={PILL} aria-busy={busy || undefined} aria-disabled={busy || undefined}
+    <button type="button" data-glass-pill="" className={PILL} aria-pressed={selected} aria-busy={busy || undefined} aria-disabled={busy || undefined}
       onClick={() => { if (!busy) onPress() }}>
       {children}
     </button>

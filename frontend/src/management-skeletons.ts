@@ -1,4 +1,5 @@
 import { islandButton, islandSelect, islandSummary } from './island-skeleton';
+import { EXACT_COPY, EXACT_TITLE, SELECT_COPY } from './duplicates-copy';
 
 const placeholder = 'relative overflow-hidden skeleton-sheen bg-background-tertiary-default rounded-lg';
 const text = (width = '60%') => `<span class="${placeholder} inline-block max-w-full align-middle" style="width:${width};height:1em"></span>`;
@@ -68,24 +69,26 @@ export function tasteSkeleton(): string {
   </div></div>`;
 }
 
-/** 重复文件首屏：完整汇总、玻璃批量条、组头和两行文件，尺寸跟正文一致。 */
+/** 文件比较首屏：汇总、视图、校验说明和可逐项选择的文件行。 */
 export function duplicatesSkeleton(): string {
   const row = `<div class="duplicate-row items-center gap-3 border-t border-separator-border px-5 py-4 max-compact:p-4">
     <span class="${placeholder} row-span-2 inline-grid aspect-16/10 w-full rounded-2lg"></span>
-    <span class="text-body-regular max-duplicate-narrow:col-start-2 max-duplicate-narrow:-col-end-1">${text('70%')}</span>
+    <span class="flex min-w-0 flex-wrap items-center gap-3 text-body-regular max-duplicate-narrow:col-start-2 max-duplicate-narrow:-col-end-1"><span class="inline-flex items-center gap-2 text-body-medium"><i class="${placeholder} size-4"></i>移入回收站</span>${text('6em')}</span>
     ${Array.from({ length: 3 }, () => `<span class="font-mono text-caption-1-regular leading-5">${text('3em')}</span>`).join('')}
     <span class="col-start-2 -col-end-1 min-w-0 pt-0.5 font-mono text-caption-1-regular leading-5 max-duplicate-narrow:col-span-full">${text('75%')}</span>
   </div>`;
   const group = `<section class="mb-6 overflow-hidden rounded-surface bg-background-secondary-default dark:bg-background-primary-default" data-duplicate-group>
     <div class="flex flex-wrap items-center gap-3 bg-background-tertiary-default p-5 max-compact:p-4 dark:bg-background-secondary-default">
-      <b class="text-title-2-medium">${text('5em')}</b><span class="font-mono text-caption-1-regular leading-5">${text('8em')}</span>
-      <span class="ml-auto flex flex-wrap gap-2 max-compact:ml-0 max-compact:w-full">${['留最大', '留最长', '整组回收'].map(label => islandButton({ variant: 'secondary', size: 'small', label, attrs: wait })).join('')}</span>
+      <b class="text-title-2-medium">${text('5em')}</b><span class="font-mono text-caption-1-regular leading-5">2 个 · SHA256 一致</span>
+      ${islandButton({ variant: 'secondary', size: 'small', label: '整组保留', attrs: wait })}
     </div>${row.repeat(2)}</section>`;
   return `<div class="peach-react"><div class="mx-auto w-full max-w-board pb-10.5">
     <div data-collection-summary class="mb-5 flex items-end justify-between gap-4 rounded-surface bg-background-secondary-default px-6 py-5 max-compact:flex-col max-compact:items-start max-compact:gap-3 max-compact:p-4 dark:bg-background-primary-default">
-      <div class="flex min-w-0 flex-col gap-2"><span class="text-body-regular text-text-secondary">重复内容</span><strong class="text-display-4-medium">${text('4em')}</strong></div><p class="text-body-regular text-text-secondary">${text('12em')}</p>
+      <div class="flex min-w-0 flex-col gap-2"><span class="text-body-regular text-text-secondary">已确认重复</span><strong class="text-display-4-medium">${text('4em')}</strong></div><p class="text-body-regular text-text-secondary">${text('12em')}</p>
     </div>
-    <div data-filter-glass data-glass-pane class="mb-5.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 px-4 py-2.5"><h3 class="mr-1 text-body-medium">批量保留</h3>${['全部保留最大', '全部保留最长'].map(label => `<button ${wait} class="h-7.5 rounded-full border border-separator-border px-3 text-body-2-medium">${label}</button>`).join('')}</div>
+    <div data-filter-glass data-glass-pane class="mb-5.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 px-4 py-2.5"><h3 class="mr-1 text-body-medium">文件比较</h3>${['雜湊确认重复', '同番号版本', '已整组保留 0 组'].map(label => `<button ${wait} class="h-7.5 rounded-full border border-separator-border px-3 text-body-2-medium">${label}</button>`).join('')}</div>
+    <div class="mb-5"><div class="@container flex flex-col gap-2 rounded-2lg bg-background-tertiary-default px-3 py-2 text-text-secondary"><div class="flex flex-col items-start gap-3 @xl:flex-row @xl:items-center @xl:justify-between"><div class="flex min-w-0 flex-1 flex-col justify-center gap-0.5 self-stretch"><p class="text-body-medium wrap-anywhere">${EXACT_TITLE}</p><p class="whitespace-pre-line text-body-2-regular wrap-anywhere">${EXACT_COPY}${SELECT_COPY}</p></div></div></div></div>
+    <div class="mb-5 flex flex-wrap items-center gap-3">${islandButton({ variant: 'secondary', size: 'small', label: '校验完整文件', attrs: wait })}<span class="text-caption-1-regular text-text-secondary">待校验 0 个 · 约 0 B</span>${islandButton({ variant: 'secondary', size: 'small', label: '将选中的 0 项移入回收站', attrs: wait })}</div>
     ${group.repeat(2)}
   </div></div>`;
 }

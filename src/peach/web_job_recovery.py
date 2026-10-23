@@ -10,6 +10,7 @@ from .web_links import w_links_check, w_links_prune
 from .web_resource_sync import w_resource_sync_scan, w_resource_sync_apply
 from .web_stats import w_taste_refresh
 from .web_media_repair import w_media_repair
+from .duplicate_files import w_duplicate_hash
 from .web_organize import w_organize_apply, w_organize_rollback
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -29,6 +30,7 @@ def restore(contract):
         "follow-resolve": lambda body: w_follow_resolve(contract, body),
         "taste-refresh": lambda body: w_taste_refresh(contract, body),
         "media-repair": lambda body: w_media_repair(contract, body),
+        "duplicate-hash": lambda body: w_duplicate_hash(contract, body),
         "amane-bridge": lambda body: w_scraping_amane_rebuild(contract, body),
         "organize": lambda body: (w_organize_rollback(contract, body) if body.get('action') == 'rollback'
                                     else w_organize_apply(contract, body)),

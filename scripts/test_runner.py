@@ -32,7 +32,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     "checks": ("test_copy_final_state.py", "test_dependency_policy.py", "test_repo_hygiene.py", "test_test_planning.py",
                "test_complexity_ratchet.py", "test_source_assertion_ratchet.py", "test_python_lint.py"),
     "follow": ("test_follow*.py", "test_http.py", "test_migrations.py", "test_wants_web.py"),
-    "catalog": ("test_ad_judgement.py", "test_composite_name_split.py", "test_media_libraries.py", "test_media_folders.py",
+    "catalog": ("test_duplicate_files.py", "test_ad_judgement.py", "test_composite_name_split.py", "test_media_libraries.py", "test_media_folders.py",
                 "test_content_region.py",
                 "test_duplicate_identity_merge.py",
                 "test_entity_classification.py", "test_company_profiles.py", "test_fc2_sellers.py",
@@ -131,7 +131,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     # 后面七个文件的主体不在这一层，但各有一段断言读 `web/` 或 `frontend/` 的源码，
     # 所以本域也要登记它们：改了 `web/app.js` 却漏跑读它的测试，`test_test_planning.py`
     # 的域映射门槛会在本地就红。
-    "web": ("test_frontend_build.py", "test_web_ui.py", "test_web_js.py", "test_web_e2e.py",
+    "web": ("test_duplicate_files.py", "test_frontend_build.py", "test_web_ui.py", "test_web_js.py", "test_web_e2e.py",
             "test_subtitle_search.py",
             "test_legacy_shell_routes.py",
             "test_web_perf.py", "test_copy_final_state.py",
@@ -244,6 +244,7 @@ AUTO_SCOPE_FILES: dict[str, tuple[str, ...]] = {
     # 个人记录的判据与搬运（ADR-0087）：资源同步与列表在 catalog，扫描登记与撤回脚本在 tooling。
     "src/peach/personal_records.py": ("catalog", "tooling"),
     "src/peach/record_rehome.py": ("catalog", "tooling"),
+    "src/peach/duplicate_files.py": ("catalog", "web"),
     "src/peach/web_orphan_records.py": ("catalog", "web"),
     "src/peach/web_library_shortcuts.py": ("catalog", "web"),
     # 入口页共用件的测试住在首启与配置来源那两份 tooling 测试里。

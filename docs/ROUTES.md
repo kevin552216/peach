@@ -81,13 +81,15 @@
 | `/taste` | 口味分析 |
 | `/review` | 人工复核 |
 | `/data-cleanup` | 数据管理 |
-| `/duplicates` | 重复文件 |
+| `/duplicates` | 完整文件重复、同番号版本与人工保留清单 |
 | `/quality-goals` | 高清版目标 |
 | `/login` | 登录 |
 
 设置分区可直接打开、刷新和用浏览器前进后退。偏好面板从当前页面打开时保留背景；配置分区复用配置页及其权限检查。配置分类导航停在搜索栏下方，切换分类时显示所选分区的开头。
 
 ## 兼容地址与服务接口
+
+`GET /api/duplicates` 默认返回完整 SHA256 与字节数一致的分组；`mode=versions` 返回人工比较用的同番号版本，`kept=true` 查看整组保留决定。结果包含校验待办文件数、预估读取字节数与后台校验状态。`POST /api/duplicates/hash` 需 `confirm_full_read=true` 才启动完整校验，`stop=true` 停止；状态由同一 GET 返回。`POST /api/duplicates/keep` 接受当前组的 `key`、`mode` 与布尔 `keep`，组成员变化时拒绝旧 key。保留决定与校验证据写本机状态，逐项回收仍走 `/api/batch` 并可还原。
 
 | 兼容地址 | 规范去处 |
 | --- | --- |

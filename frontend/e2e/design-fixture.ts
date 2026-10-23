@@ -272,9 +272,9 @@ export const duplicateFile = (id: number, location: string, patch: Record<string
 export async function openDuplicates(browser: Browser): Promise<Visit> {
   const opened = await visit(browser, '/duplicates', DESKTOP);
   const groups = [
-    { code: 'DUPE-001', count: 2, identical: true, drives: ['R:'], cross_drive: false, reclaimable: 1073741824,
+    { key: 'dupe-001', kept: false, code: 'DUPE-001', count: 2, identical: true, drives: ['R:'], cross_drive: false, reclaimable: 1073741824,
       files: [duplicateFile(9001, 'local', { is_largest: true }), duplicateFile(9002, 'local', { is_longest: true })] },
-    { code: 'DUPE-002', count: 2, identical: false, drives: ['R:', 'B:'], cross_drive: true, reclaimable: 1073741824,
+    { key: 'dupe-002', kept: false, code: 'DUPE-002', count: 2, identical: true, drives: ['R:', 'B:'], cross_drive: true, reclaimable: 1073741824,
       files: [duplicateFile(9003, 'local', { is_largest: true, is_longest: true }), duplicateFile(9004, '115')] },
   ];
   await opened.page.route('**/api/duplicates?**', (route) => route.fulfill({

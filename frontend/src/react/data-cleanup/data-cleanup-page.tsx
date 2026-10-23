@@ -83,7 +83,7 @@ export function DataCleanupPage({ toast, failure, open }: DataCleanupProps) {
                 figure: `${Number(data.total).toLocaleString()} 组 · ${Number(data.files || 0).toLocaleString()} 个文件`,
                 meta: `可回收 ${fmtSize(data.reclaimable || 0)}`,
               }
-            : { figure: '没有重复内容' }))} />
+            : { figure: '尚未确认重复', meta: `${data.pending_files || 0} 个同大小文件待校验` }))} />
         <EntryCard section="ads" label="垃圾文件" icon={JUNK} open={open}
           value={reading(junk, (data) => ({
             figure: `${Number(data.pending_total || 0).toLocaleString()} 个待判断`, meta: junkBreakdown(data),

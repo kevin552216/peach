@@ -2206,6 +2206,21 @@ class _LocalEvidenceCache:
         return local
 
 
+def _finish_interrupted_processing(state, path, control, report, error):
+    """保存中断结果；用户停止发回取消回执，故障继续交给任务中心。"""
+    state.update(status='failed', error='处理被中断。核对媒体目录后重试。', completed_at=time.time())
+    state.update(interrupted_state(control))
+    if isinstance(error, ProcessingStopped):
+        state.update(status='cancelled', stage='已停止', error='', followups=[], completed_at=time.time())
+    if state['status'] == 'cancelled':
+        state.update(current_action='', current_started_at=None, current_deadline_at=None)
+    _save(path, state)
+    if state['status'] == 'cancelled':
+        report(dict(state))
+        return
+    raise error
+
+
 def process_library(config, db_path, candidate_root, cover_root, *, location='configured',
                     report=lambda state: None, provider_factory=None, job_id=None,
                     retry_ids=None, active=lambda: True, stage=ALL_STAGES,
@@ -2473,20 +2488,8 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                    error=issue_summary(state['issue_count'], state['paused_count']),
                    completed_at=time.time(), current_asset_id=None, current_asset_name='',
                    current_action='', current_started_at=None, current_deadline_at=None)
-        except ProcessingStopped:
-            state.update(status='cancelled', stage='已停止', error='', followups=[],
-                         completed_at=time.time(), current_action='',
-                         current_started_at=None, current_deadline_at=None)
-            _save(path, state)
-            report(dict(state))
-        except Exception:
-            state.update(status='failed', error='处理被中断。核对媒体目录后重试。', completed_at=time.time())
-            state.update(interrupted_state(control))
-            _save(path, state)
-            if state['status'] == 'cancelled':
-                report(dict(state))
-                return state
-            raise
+        except Exception as error:
+            _finish_interrupted_processing(state, path, control, report, error)
         finally:
             # 被打断也把已经攒下的候选写全：文件里要么是上一份完整的，要么是这一份完整的。
             flush_candidates(force=True)

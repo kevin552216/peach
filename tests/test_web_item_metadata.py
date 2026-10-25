@@ -72,6 +72,26 @@ class ItemMetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             metadata.w_item_metadata(self.contract, {'id': 1, 'source': 'dmm'})
 
+    def test_completion_during_read_does_not_stop_polling_with_old_candidates(self):
+        completed = self.prepare()
+        self.contract.item_metadata_job.state = {'job_id': 'fetch', 'status': 'running', 'asset_id': 1}
+        saved = metadata._saved
+
+        def finishing(asset_id):
+            self.contract.item_metadata_job.state['status'] = 'complete'
+            return {}
+
+        with patch.object(metadata, '_saved', side_effect=finishing):
+            crossing = self.read()
+        self.assertTrue(crossing['busy'])
+        self.assertEqual(crossing['job']['status'], 'running')
+        self.assertEqual(crossing['groups'], [])
+        with patch.object(metadata, '_saved', wraps=saved):
+            after = self.read()
+        self.assertFalse(after['busy'])
+        self.assertEqual(after['snapshot_id'], completed['snapshot_id'])
+        self.assertTrue(after['groups'])
+
     def test_fetch_only_prepares_candidates_and_apply_is_scoped_and_protected(self):
         state = self.prepare()
         self.assertTrue(state['groups'])

@@ -762,6 +762,22 @@ def _unmasked_titles(field: str, candidates: list[dict], current: str = "") -> l
     return rows
 
 
+def _chain_winner(field: str, code: str, candidates: list[dict], keys: dict):
+    """选择来源链首的可用取值；同级分歧与高优先未解称呼留待复核。"""
+    ranks = {id(c): chain_rank(field, str(c.get("source") or "").strip(), code=code)
+             for c in candidates}
+    winner = min(candidates, key=lambda candidate: ranks[id(candidate)])
+    if keys[id(winner)] is None:
+        return None
+    if None in keys.values() and not (field == "performers" and _FC2_CODE.match(code)
+                                     and winner.get("source") == "fc2cmadb"):
+        return None
+    if any(ranks[id(c)] == ranks[id(winner)] and keys[id(c)] != keys[id(winner)]
+           for c in candidates):
+        return None
+    return winner
+
+
 def _settled_candidates(connection, field: str, code: str, candidates: list[dict],
                         resolve=None) -> tuple[list[dict], str | None, list[dict]]:
     """取值只剩一个的那组候选、据以取舍的规则，以及被压下的那些取值。
@@ -790,18 +806,10 @@ def _settled_candidates(connection, field: str, code: str, candidates: list[dict
         return [], None, []
     if len(values) == 1 and None not in values:
         return candidates, settled_by, []
-    ranks = {id(c): chain_rank(field, str(c.get("source") or "").strip(), code=code)
-             for c in candidates}
-    winner = min(candidates, key=lambda candidate: ranks[id(candidate)])
-    if keys[id(winner)] is None:
-        return [], None, []
-    if None in values and not (field == "performers" and _FC2_CODE.match(code)
-                               and winner.get("source") == "fc2cmadb"):
-        return [], None, []
     # 同一家给出两个不同的值时，链上没有人能替它取舍：`ranks` 里它们分数相同，`min`
     # 只会按列表顺序挑一个，而那个顺序不表达任何判断。这种行交回人工。
-    if any(ranks[id(c)] == ranks[id(winner)] and keys[id(c)] != keys[id(winner)]
-           for c in candidates):
+    winner = _chain_winner(field, code, candidates, keys)
+    if winner is None:
         return [], None, []
     chosen = [c for c in candidates if keys[id(c)] == keys[id(winner)]]
     overruled = [{"source": str(c.get("source") or "").strip(),

@@ -75,6 +75,8 @@ def _protections(connection, asset_id):
 
 def q_item_metadata(contract, args):
     row, code = _asset(contract, args.get('id'))
+    # 先读任务状态：完成状态必须对应已经发布的候选，避免轮询提前停止。
+    job = contract.item_metadata_job.snapshot() or {'status': 'idle'}
     saved = _saved(row['id'])
     # 文件路径与番号共同钉住取证范围，改过身份的旧结果不能用于当前影片。
     if saved.get('code') != code or saved.get('asset_path') != row['path']:
@@ -88,7 +90,6 @@ def q_item_metadata(contract, args):
                                       for choice in json.loads(group['candidates_json'])]})
     with contract.read_connection() as connection:
         protected = _protections(connection, row['id'])
-    job = contract.item_metadata_job.snapshot() or {'status': 'idle'}
     return {'id': row['id'], 'code': code, 'sources': [{'id': key, 'label': label} for key, label in _sources(row, code)],
             'snapshot_id': saved.get('snapshot_id', ''), 'fetched_at': saved.get('fetched_at'),
             'revision': row['mutation_revision'], 'groups': groups, 'protected': protected,

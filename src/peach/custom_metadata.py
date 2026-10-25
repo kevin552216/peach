@@ -156,7 +156,7 @@ def _remaining_seconds(deadline: float) -> float:
     return remaining
 
 
-def fetch_json(url: str, timeout: float, *, client_options=None):
+def fetch_json(url: str, timeout: float, *, client_options=None, user_agent=None):
     expires = time.monotonic() + timeout
     _remaining_seconds(expires)
     host = urlsplit(url).hostname or ''
@@ -177,7 +177,7 @@ def fetch_json(url: str, timeout: float, *, client_options=None):
     with requests.Session(curl_options=curl_options, **options) as client:
         try:
             with client.stream('GET', url, timeout=_remaining_seconds(expires), allow_redirects=False,
-                               headers={'Accept': 'application/json'}) as response:
+                               headers={'Accept': 'application/json', **({'User-Agent': user_agent} if user_agent else {})}) as response:
                 if response.status_code != 200:
                     raise ValueError(f'来源响应 HTTP {response.status_code}')
                 chunks, total = [], 0
@@ -206,7 +206,10 @@ def query(config: dict, code: str, *, deadline=None, secrets_root=None) -> SiteR
         from .peach_proxy import client_options
         options = client_options(Path(secrets_root))
     try:
-        document = fetch_json(url, _remaining_seconds(expires), client_options=options)
+        from .metadata_preferences import load
+        from .user_agent import USER_AGENT
+        agent = load(Path(secrets_root))['user_agent'] if secrets_root is not None else USER_AGENT
+        document = fetch_json(url, _remaining_seconds(expires), client_options=options, user_agent=agent)
     except (json.JSONDecodeError, UnicodeError) as error:
         raise ValueError('来源响应不是有效 JSON') from error
     return parse(config, code, document)

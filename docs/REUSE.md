@@ -6,6 +6,8 @@
 
 同步保护登记在 `review_decision.note.user_locked`，标量同时使用既有 `review:<来源>` 字段归属；自动结算在并集补标签、过期重判前保留这些字段。解除保护保留现值和来源回执，后续也可显式采用另一来源。候选快照号、资产路径、番号与 `mutation_revision` 联合防止过期页面或错片写入，多字段采用在同一事务内完成。后台查询复用 `BackgroundJob`、任务中心与重启恢复，落盘复用原子写入和现有 filelock；不增加迁移。
 
+共用写入入口按实际命中的资产与字段检查保护，旧版按番号分组的候选与自动标签并集也受约束；同一组里有受保护资产时交回复核。用户明确批准的采用仍可替换保护值。
+
 来源偏好复用 `metadata_routes.parse_route_overrides`、内容类型裁剪与既有 HTTPX 客户端。保存的是本机内置来源的排列和经单行 ASCII 校验的 User-Agent，读取失败回到内置默认；显式任务路由仍覆盖对应类型。amane 桥通过既有 CLI 边界传递身分，薄适配器只在上游 `WebClient.request` 公开入口补请求头，不修改指纹、重试与限流策略。排序复用 `wireDragReorder` 并提供 Alt 与方向键操作。失败清单导出复用 `/api/library-processing/issues` 的任务号校验与分页响应，浏览器原生 Blob 下载 JSON，不引入导出库。
 
 ## 检查输入与源码文案

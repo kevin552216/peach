@@ -97,6 +97,13 @@ class MetadataSelection:
             options['include_covers'] = False
         return remote.collect(row, code, wanted, cover_root, **options)
 
+    def answered(self, groups, target_key, fields, verify_existing=False):
+        """所选缺口仍需查询；快照与来源缺失记忆负责避免重复联网。"""
+        if self.fields is not None or verify_existing:
+            return ()
+        from .library_processing import _answered_sources
+        return _answered_sources(groups, target_key, fields)
+
     def groups(self, groups):
         return {key: group for key, group in groups.items()
                 if self.allowed is None or group.get('field') in self.allowed}

@@ -86,7 +86,7 @@ def _archive_pages(url):
 
 
 class LibraryNfoTests(unittest.TestCase):
-    def _selected_metadata_case(self, fill_other, **options):
+    def _selected_metadata_case(self, fill_other, stale_candidate=False, cached_source=False, **options):
         options.setdefault('tasks', ['metadata'])
         media = self.root / 'media'
         media.mkdir()
@@ -107,9 +107,24 @@ class LibraryNfoTests(unittest.TestCase):
         config = PeachConfig(self.root, self.root / 'config.toml', present=True,
                              locations={'local': (str(media),)})
         database = LedgerDatabase(db)
+        if stale_candidate:
+            from peach.library_processing import _merge_candidates, FIELDS
+            from peach.review_csv import write_rows
+            with database.read_connection() as connection:
+                row = dict(connection.execute('SELECT * FROM asset WHERE id=1').fetchone())
+            groups = {}
+            payload = {'actresses': [{'japanese_name': '巨乳保育士'}]}
+            evidence = self.root / 'old-source.json'
+            evidence.write_text(json.dumps(payload), encoding='utf-8')
+            _merge_candidates(groups, row, 'ABW-358', 'r18dev', payload, evidence, {})
+            write_rows(self.root / 'generated/library-metadata-field-candidates.csv', FIELDS, groups.values())
         provider = stub_provider()
         provider.query.return_value = {'id': 'ABW-358', 'title': '来源标题', 'maker': 'Prestige',
             'release_date': '2023-05-26', 'actresses': [{'japanese_name': '涼森れむ'}]}
+        if cached_source:
+            path = config.directory('sources') / 'library-metadata/ABW-358-r18dev.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(provider.query.return_value), encoding='utf-8')
         with patch('peach.library_processing._enrich_finished_performers',
                    return_value={'aliases': 0, 'avatars': 0, 'conflicts': 0, 'failed': 0}):
             result = process_library(config, db, self.root / 'generated', self.root / 'covers',
@@ -119,7 +134,7 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertEqual(result['metadata_inspected'], 2)
         self.assertEqual(result['metadata_skipped_complete'], 1)
         self.assertEqual(result['metadata_eligible'], 1)
-        self.assertEqual([call.args[0] for call in provider.query.call_args_list], ['ABW-358'])
+        self.assertEqual([call.args[0] for call in provider.query.call_args_list], [] if cached_source else ['ABW-358'])
         provider.cover.assert_not_called()
         provider.community.assert_not_called()
         with database.read_connection() as connection:
@@ -139,6 +154,14 @@ class LibraryNfoTests(unittest.TestCase):
     @windows_ledger_roots
     def test_selected_missing_fields_can_exclude_other_empty_fields(self):
         self._selected_metadata_case(False)
+
+    @windows_ledger_roots
+    def test_selected_missing_fields_query_a_source_with_an_unapplied_candidate(self):
+        self._selected_metadata_case(True, stale_candidate=True)
+
+    @windows_ledger_roots
+    def test_selected_missing_fields_reuse_a_source_snapshot_with_an_unapplied_candidate(self):
+        self._selected_metadata_case(True, stale_candidate=True, cached_source=True)
 
     @windows_ledger_roots
     def test_parallel_metadata_work_applies_the_missing_field_filter(self):

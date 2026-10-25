@@ -23,7 +23,7 @@ from .update_tasks import activity
 
 TASKS = ('scan', 'probe', 'metadata', 'covers', 'previews')
 LABELS = dict(scan='扫描文件', probe='读取媒体属性', metadata='采集缺失资料', covers='补全封面', previews='生成视频预览')
-DEFAULTS = dict(all=TASKS, collect=TASKS[1:], scan=('scan', 'probe'),
+DEFAULTS = dict(all=TASKS, collect=TASKS[1:], scan=('scan',),
                 metadata=('metadata', 'covers'), previews=('previews',), probe=('probe',), covers=('covers',))
 
 
@@ -560,7 +560,7 @@ class MetadataWork:
         missing = self.selection.wanted(row, fields, verify_existing, database=runner.database, code=code)
         found, _ = self.selection.collect(runner.get_remote(), row, code, missing, runner.cover_root,
             update=runner.update, issue=runner.issue, include_covers=False,
-            answered=() if verify_existing else engine._answered_sources(self.groups, f"asset:{row['id']}", missing),
+            answered=self.selection.answered(self.groups, f"asset:{row['id']}", missing, verify_existing),
             received=lambda entries: self.publish(row, code, fields, entries, verify_existing))
         with runner.lock:
             runner.checkpoints.queue_metadata(row, entries + found if local_ok else [], issues,

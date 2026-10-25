@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from peach import web_contract, web_item_metadata as metadata
-from peach.metadata_auto_apply import auto_apply_metadata, metadata_decision_is_stale
+from peach.metadata_auto_apply import (auto_apply_metadata, metadata_decision_is_stale,
+                                      _apply_metadata_candidate, _extend_approved_tags)
+from peach.field_owners import auto_owner, review_owner
 from peach.settings_file import PeachConfig
 from support.ledger import fresh_ledger
 
@@ -100,6 +102,35 @@ class ItemMetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             metadata.w_item_metadata(self.contract, {'id': 1, 'action': 'unlock', 'field': 'performers',
                 'expected_revision': state['revision']})
+
+    def test_legacy_code_group_cannot_overwrite_a_protected_file(self):
+        self.apply(self.prepare(), ['performers'])
+        group = next(group for group in metadata._saved(1)['groups'] if group['field'] == 'performers')
+        candidate = json.loads(group['candidates_json'])[0]
+        candidate.update(value=[{'name': '相沢みなみ'}], candidate_key='new-source-value')
+        legacy = {**group, 'item_key': 'FC2-PPV-1234567:performers'}
+        legacy.pop('asset_id')
+        legacy.pop('asset_path')
+        with self.assertRaises(ValueError):
+            with self.contract.write_transaction() as connection:
+                _apply_metadata_candidate(connection, legacy, candidate, 'now', auto_owner('fc2cmadb'))
+
+    def test_legacy_tag_union_respects_protection_but_explicit_review_can_replace(self):
+        self.prepare()
+        group = next(group for group in metadata._saved(1)['groups'] if group['field'] == 'title')
+        candidate = json.loads(group['candidates_json'])[0]
+        candidate.update(value=['巨乳'], candidate_key='tags')
+        group.update(field='tags', item_key='asset:1:tags')
+        with self.contract.write_transaction() as connection:
+            _apply_metadata_candidate(connection, group, candidate, 'now', review_owner('fc2cmadb'))
+            connection.execute("INSERT INTO review_decision(category,item_key,status,note,updated_at) "
+                               "VALUES('metadata_fields','asset:1:tags','approved',?,'now')",
+                               (json.dumps({'user_locked': True, 'source': 'fc2cmadb'}),))
+            legacy = {key: value for key, value in group.items() if key not in ('asset_id', 'asset_path')}
+            legacy['item_key'] = 'FC2-PPV-1234567:tags'
+            candidate.update(value=['巨乳', '口交'], candidate_key='new-tags')
+            self.assertIsNone(_extend_approved_tags(connection, legacy, candidate, 'union-test', 'now'))
+            self.assertEqual(_apply_metadata_candidate(connection, group, candidate, 'now', review_owner('fc2cmadb')), 1)
 
     def test_sync_preserves_locked_fields_even_when_candidates_change(self):
         state = self.prepare()

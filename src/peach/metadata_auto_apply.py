@@ -1256,6 +1256,20 @@ def _landing_scope(connection, group: dict, candidate: dict,
     return asset_ids, source, confidence, metadata
 
 
+def _sync_protected(connection, asset_ids, field):
+    """字段保护跟随资产，所有候选键形态共用同一份保护记录。"""
+    keys = [f'asset:{asset_id}:{field}' for asset_id in asset_ids]
+    for start in range(0, len(keys), 500):
+        batch = keys[start:start + 500]
+        marks = ','.join('?' for _ in batch)
+        rows = connection.execute(
+            "SELECT note FROM review_decision WHERE category='metadata_fields' AND status='approved' "
+            f"AND item_key IN ({marks})", batch)
+        if any(_decision_note(dict(row)).get('user_locked') for row in rows):
+            return True
+    return False
+
+
 def _apply_metadata_candidate(
     connection, group: dict, candidate: dict, now: str, owner: str, *,
     expected_revision: int | None = None,
@@ -1273,6 +1287,8 @@ def _apply_metadata_candidate(
     code = str(group.get("code") or "").strip()
     asset_ids, source, confidence, metadata = _landing_scope(
         connection, group, candidate, expected_revision)
+    if not is_protected(owner) and _sync_protected(connection, asset_ids, field):
+        raise ValueError('这项资料已由用户保护，请明确复核后采用')
     marks = ",".join("?" * len(asset_ids))
 
     if field in {"title", "original_title"}:
@@ -1385,6 +1401,8 @@ def _extend_approved_tags(connection, row: dict, candidate: dict, batch: str,
     try:
         written = current_tags(_approved_entity_name(tag, "tag") for tag in raw_tags)
         asset_ids, _source, confidence, metadata = _landing_scope(connection, row, candidate)
+        if _sync_protected(connection, asset_ids, 'tags'):
+            return None
     except ValueError:
         return None
     marks = ",".join("?" * len(asset_ids))

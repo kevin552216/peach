@@ -786,13 +786,18 @@ def _settled_candidates(connection, field: str, code: str, candidates: list[dict
                   if str(c.get("source") or "").strip() not in FALLBACK_SOURCES] or candidates
     keys = {id(c): _candidate_value_key(connection, field, c, resolve) for c in candidates}
     values = set(keys.values())
-    if None in values or not values:
+    if not values:
         return [], None, []
-    if len(values) == 1:
+    if len(values) == 1 and None not in values:
         return candidates, settled_by, []
     ranks = {id(c): chain_rank(field, str(c.get("source") or "").strip(), code=code)
              for c in candidates}
     winner = min(candidates, key=lambda candidate: ranks[id(candidate)])
+    if keys[id(winner)] is None:
+        return [], None, []
+    if None in values and not (field == "performers" and _FC2_CODE.match(code)
+                               and winner.get("source") == "fc2cmadb"):
+        return [], None, []
     # 同一家给出两个不同的值时，链上没有人能替它取舍：`ranks` 里它们分数相同，`min`
     # 只会按列表顺序挑一个，而那个顺序不表达任何判断。这种行交回人工。
     if any(ranks[id(c)] == ranks[id(winner)] and keys[id(c)] != keys[id(winner)]

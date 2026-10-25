@@ -1060,6 +1060,38 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(json.loads(note)["descriptive_dropped"],
                          [{"source": "javdb", "value": "145cm色白お嬢様"}])
 
+    def test_fc2_preferred_cast_lands_with_a_mixed_lower_priority_candidate(self):
+        """首选来源给出完整艺名时，低优先混合称呼保留为取舍证据。"""
+        for index, reverse in enumerate((False, True)):
+            code = f"FC2-PPV-{1900100 + index}"
+            key = code + ":performers"
+            self._asset(9001 + index, code, code + ".mp4")
+            candidates = [("fc2cmadb", "大村阿美香"),
+                          ("fc2ppvdb", "神山ももか、かえでちゃん")]
+            self.write_metadata_rows([self._fc2_performer_row(
+                key, code, *(reversed(candidates) if reverse else candidates))])
+            self.assertEqual(self._auto_without_snapshots()["applied"], 1)
+            self.assertEqual(self._performers_of(9001 + index), ["大村阿美香"])
+            status, note = self._decision(key)
+            self.assertEqual(status, "approved")
+            self.assertEqual(json.loads(note)["overruled"],
+                [{"source": "fc2ppvdb", "value": "神山ももか、かえでちゃん"}])
+            self.assertEqual(self._auto_without_snapshots()["applied"], 0)
+
+    def test_fc2_mixed_cast_at_equal_or_higher_priority_waits_for_review(self):
+        """同级或更高优先级的未解称呼仍交复核，整条演出者不拆开套用。"""
+        for index, source in enumerate(("fc2ppvdb", "fc2cmadb")):
+            with self.subTest(source=source):
+                code = f"FC2-PPV-{1900110 + index}"
+                self._asset(9011 + index, code, code + ".mp4")
+                self.write_metadata_rows([self._fc2_performer_row(
+                    code + ":performers", code,
+                    (source, "大村阿美香"), ("fc2cmadb", "神山ももか、かえでちゃん"))])
+                result = self._auto_without_snapshots()
+                self.assertEqual((result["applied"], result["auto_rejected"]), (0, 0))
+                self.assertEqual(self._performers_of(9011 + index), [])
+                self.assertIn(code + ":performers", self.queue_keys("metadata_fields"))
+
     def test_fc2_rows_that_still_need_a_person_to_pick_a_name_stay_in_review(self):
         """四种行不替人决定。
 

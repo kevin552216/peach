@@ -47,3 +47,13 @@ class MetadataPreferencesTests(unittest.TestCase):
             with self.subTest(routes=routes), self.assertRaises(ValueError):
                 preferences.w_metadata_preferences(None, {'routes': routes})
         self.assertEqual(preferences.load(root)['user_agent'], 'Test Browser/1')
+
+    def test_custom_json_sources_use_the_same_saved_agent(self):
+        from peach import custom_metadata
+        root = self.config.directory('secrets')
+        preferences.w_metadata_preferences(None, {'user_agent': 'Test Browser/1'})
+        definition = {'name': '测试来源', 'endpoint': 'https://metadata.example.com/{code}',
+                      'fields': {'code': 'id', 'title': 'title'}, 'content_types': ['censored'], 'enabled': True}
+        with patch.object(custom_metadata, 'fetch_json', return_value={'id': 'ABW-001', 'title': '来源标题'}) as fetch:
+            custom_metadata.query(definition, 'ABW-001', secrets_root=root)
+        self.assertEqual(fetch.call_args.kwargs['user_agent'], 'Test Browser/1')

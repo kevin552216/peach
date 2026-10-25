@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/a5610874-e611-41bb-be22-7d99f0d64b62
 - **Pick from the video wall**: drag through a full-screen cover wall and play in place, with versions and parts of the same title grouped together.
 - **Player subtitles**: load local subtitles, search SubtitleCat for simplified and traditional Chinese subtitles by video code, then adjust fonts, size, colors and backgrounds. No API key is required; results may include machine translations.
 - **Bring your existing collection**: read NFO files and posters, then fill missing titles, performers, studios and covers from multiple sources while keeping your edits.
-- **Refresh one video's metadata**: choose a source in the video details, adopt individual fields and protect them during library synchronization. Save source priorities and an HTTP User-Agent, retry unfinished items or export their full list. See [operation and configuration](docs/OPERATIONS.md#重新取得一部影片的资料).
+- **Refresh one video's metadata**: select one or multiple sources in the video details, adopt individual fields and protect them during library synchronization. Save source priorities and an HTTP User-Agent, retry unfinished items or export their full list. See [operation and configuration](docs/OPERATIONS.md#重新取得一部影片的资料).
 - **Follow across sites**: combine a creator's updates from FANBOX, Patreon, Kemono and other sites, with matching posts grouped into one card.
 - **Find your next watch**: subscribe to performers' new releases, discover titles based on your taste and save them to your want list.
 - **Cloud download**: search by video code or paste a magnet link, send it to 115 or PikPak and organize the downloaded video into your library automatically.

@@ -22,12 +22,14 @@ afterEach(() => {
 });
 
 const state: ItemMetadataData = { id: 1, code: 'FC2-PPV-1234567', snapshot_id: 'snapshot', revision: 2,
-  busy: false, sources: [{ id: 'fc2cmadb', label: 'FC2CMADB' }], issues: [], protected: [], job: { status: 'idle' },
+  busy: false, sources: [{ id: 'fc2cmadb', label: 'FC2CMADB' }, { id: 'fc2ppvdb', label: 'FC2PPV-DB' },
+    { id: 'javdb', label: 'javdb' }], issues: [], protected: [], job: { status: 'idle' },
   groups: [{ field: 'performers', label: '出演者', current: '', candidates: [
     { candidate_key: 'cast', source: 'fc2cmadb', display_value: '来源艺名', source_url: 'https://example.test/article' },
+    { candidate_key: 'other-cast', source: 'fc2ppvdb', display_value: '另一来源艺名' },
   ] }] };
 
-it('打开详情不联网取证，展开后可指定来源查询并逐字段采用保护', async () => {
+it('打开详情不联网取证，可勾选多家来源并从候选中逐字段采用保护', async () => {
   queryClient.clear();
   const receipt = vi.fn();
   const fetcher = vi.fn(async (_url: string, options?: RequestInit) => ({ ok: true,
@@ -39,12 +41,14 @@ it('打开详情不联网取证，展开后可指定来源查询并逐字段采�
   await click(buttonNamed('重新抓取资料', host));
   await settle();
   expect(fetcher.mock.calls).toHaveLength(1);
-  await click(host.querySelector('#metadata-source-1 [data-select-trigger]'));
-  await click(host.querySelector('#metadata-source-1 [data-select-option="fc2cmadb"]'));
+  for (const name of ['FC2CMADB', 'FC2PPV-DB']) {
+    await click([...host.querySelectorAll('label')].find(label => label.textContent?.trim() === name));
+  }
   await settle();
   await click(buttonNamed('查询最新资料', host));
   const fetchBody = JSON.parse(String(fetcher.mock.calls.find(([, options]) => options?.method === 'POST')?.[1]?.body));
-  expect(fetchBody).toMatchObject({ id: 1, action: 'fetch', source: 'fc2cmadb' });
+  expect(fetchBody).toMatchObject({ id: 1, action: 'fetch', sources: ['fc2cmadb', 'fc2ppvdb'] });
+  expect(host.textContent).toContain('所选的 2 家来源');
   await click(host.querySelector('#metadata-1-performers [data-select-trigger]'));
   await click(host.querySelector('#metadata-1-performers [data-select-option="cast"]'));
   await settle();
@@ -55,6 +59,19 @@ it('打开详情不联网取证，展开后可指定来源查询并逐字段采�
   });
   expect(host.textContent).toContain('出演者已保护');
   expect(receipt).toHaveBeenCalledWith('已采用并保护影片资料');
+});
+
+it('未指定来源使用自动顺序，勾选可取消并回到自动顺序', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => state })));
+  const host = await mount(<QueryClientProvider client={queryClient}><ItemMetadata id={1} onReceipt={vi.fn()} /></QueryClientProvider>);
+  await click(buttonNamed('重新抓取资料', host));
+  await settle();
+  expect(host.textContent).toContain('未指定来源时按默认顺序查询');
+  await click([...host.querySelectorAll('label')].find(label => label.textContent?.trim() === 'FC2PPV-DB'));
+  expect(host.textContent).toContain('所选的 1 家来源');
+  await click(buttonNamed('使用默认来源顺序', host));
+  expect(host.textContent).toContain('未指定来源时按默认顺序查询');
+  expect([...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every(input => !input.checked)).toBe(true);
 });
 
 it('网站限流原因保留在原位置，重新打开时能读取已保护字段', async () => {

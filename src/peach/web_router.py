@@ -86,6 +86,8 @@ from .web_follow import (
 from .web_links import w_links, w_links_check, w_links_prune
 from .web_library_processing import q_library_processing, q_library_processing_issues, w_library_processing
 from .web_media_repair import q_media_repair, w_media_repair
+from .web_item_metadata import q_item_metadata, w_item_metadata
+from .metadata_preferences import q_metadata_preferences, w_metadata_preferences
 from .web_organize import (
     q_organize, w_organize_apply, w_organize_preview, w_organize_rollback,
 )
@@ -355,6 +357,8 @@ GET_HANDLERS = {
     "/api/links/prune": lambda contract, args: contract.link_prune_job.snapshot() or {"status": "idle"},
     "/api/resource-sync/apply": lambda contract, args: contract.resource_apply_job.snapshot() or {"status": "idle"},
     "/api/media-repair": q_media_repair,
+    "/api/item-metadata": q_item_metadata,
+    "/api/metadata-preferences": q_metadata_preferences,
     "/api/orphan-records": q_orphan_records,
     "/api/organize": q_organize,
     "/api/items": q_items,
@@ -444,6 +448,8 @@ POST_HANDLERS = {
     "/api/media-repair": w_media_repair,
     "/api/duplicates/hash": w_duplicate_hash,
     "/api/duplicates/keep": w_duplicate_keep,
+    "/api/item-metadata": w_item_metadata,
+    "/api/metadata-preferences": w_metadata_preferences,
     "/api/review/decision": w_review_decision,
     "/api/review/genre": w_review_genre,
     "/api/settings": w_settings,
@@ -462,6 +468,7 @@ READ_ONLY_POST_ROUTES = frozenset({
     "/api/media-processing",
     "/api/folders/preview",
     "/api/custom-metadata",
+    "/api/metadata-preferences",
     "/api/scraping/settings", "/api/scraping/check",
     "/api/follow/resolve", "/api/follow/credential",
     "/api/taste/refresh", "/api/taste/source", "/api/resource-sync/scan",

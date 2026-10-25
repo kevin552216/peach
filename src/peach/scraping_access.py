@@ -386,10 +386,11 @@ def browser_profile(root: Path) -> Path:
 
 
 def client_for(root: Path, source: str, *, session: bool = False, **kwargs) -> httpx.Client:
+    from .metadata_preferences import load
     values = values_for(root, source)
     network = {"trust_env": False} if values.get("network") == "direct" else peach_proxy.client_options(root)
     options = {**network, "follow_redirects": True,
-               "headers": {"User-Agent": USER_AGENT}}
+               "headers": {"User-Agent": load(root)['user_agent']}}
     if session:
         options["cookies"] = cookie_jar(values, source)
     options.update(kwargs)
@@ -556,8 +557,9 @@ class SourceTransport:
             client = client_for(self.root, source, session=bool(SOURCES[source].get("session")),
                                 follow_redirects=False)
         else:
+            from .metadata_preferences import load
             client = httpx.Client(**peach_proxy.client_options(self.root), follow_redirects=False,
-                                  headers={"User-Agent": USER_AGENT})
+                                  headers={"User-Agent": load(self.root)['user_agent']})
         return HttpxTransport(client, owns_client=True)
 
     def renew(self):

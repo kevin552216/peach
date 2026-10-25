@@ -276,6 +276,7 @@ class AmaneBridge:
     def query(self, code: str, sites: Sequence[str], *, language: str = "jp",
               proxy_options: Mapping[str, object] | None = None,
               direct_sites: Sequence[str] = (),
+              user_agent: str = '',
               timeout: float | None = None) -> dict:
         """问几站，返回桥的整份报告（`sites` 键下每站一条记录）。"""
         number = validate_provider_code(code)
@@ -288,7 +289,7 @@ class AmaneBridge:
         from .processing_control import low_mode, checkpoint
         if low_mode() and len(names) > 1:
             return self._serial_query(code, names, language=language, proxy_options=proxy_options,
-                                      direct_sites=direct_sites, timeout=timeout)
+                                      direct_sites=direct_sites, timeout=timeout, user_agent=user_agent)
         checkpoint('network')
         proxy_args, env = proxy_argument(proxy_options or {"trust_env": True})
         env["PYTHONIOENCODING"] = "utf-8"
@@ -297,6 +298,8 @@ class AmaneBridge:
                    *proxy_args]
         if direct_sites:
             command.extend(["--direct-sites", ",".join(direct_sites)])
+        if user_agent:
+            command.extend(['--user-agent', user_agent])
         try:
             completed = self.runner(
                 command, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -318,7 +321,7 @@ class AmaneBridge:
             raise MetadataProviderError(str(message or f"amane 桥查询失败（exit {completed.returncode}）"))
         return report
 
-    def _serial_query(self, code, sites, *, language, proxy_options, direct_sites, timeout):
+    def _serial_query(self, code, sites, *, language, proxy_options, direct_sites, timeout, user_agent=''):
         """低占用逐站启动桥查询，保留统一的整档时间预算。"""
         from .processing_control import checkpoint, deadline_after
         deadline = deadline_after(timeout) if timeout else None
@@ -329,7 +332,7 @@ class AmaneBridge:
             if remaining is not None and remaining <= 1:
                 raise MetadataProviderError('amane 桥查询超时', kind='unavailable', retryable=True, temporary=True)
             report = self.query(code, [site], language=language, proxy_options=proxy_options,
-                                direct_sites=[site] if site in direct_sites else [], timeout=remaining)
+                                direct_sites=[site] if site in direct_sites else [], timeout=remaining, user_agent=user_agent)
             records.update(report.get('sites') or {})
         return {'number': code, 'sites': records}
 

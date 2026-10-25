@@ -491,6 +491,8 @@ def metadata_decision_is_stale(decision: dict, candidates: list[dict], *, code: 
     保守放过——宁可漏一条，也不要把用户已经判过的东西重新翻出来。
     """
     note = _decision_note(decision)
+    if note.get('user_locked'):
+        return False
     keys = {str(candidate.get("candidate_key") or "").strip()
             for candidate in candidates or []} - {""}
     if not keys:
@@ -1497,6 +1499,9 @@ def auto_apply_metadata(database, candidate_root, *, batch_size=AUTO_APPLY_BATCH
                     continue
                 row["candidates"] = _row_candidates(row, genres)
                 prior = decided.get(item_key)
+                if prior and _decision_note(prior).get('user_locked'):
+                    skipped += 1
+                    continue
                 if overwrite_requires_review(connection, row):
                     skipped += 1
                     continue

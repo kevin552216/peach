@@ -30,6 +30,13 @@ FC2 来源链的缺失判断同样复用完整艺名解析：含未解称呼的�
 疑似重复暂缓复用已登记的番号、大小和已知时长，只跳过预览；不执行全文件哈希、不共享文件或图像产物。每个暂缓资产有独立记录，关闭选项的新任务按实际产物继续补缺。临时账本回归覆盖单项隔离、人工字段、真实预览复用、并行屏障、暂停／停止、失败退出、原配置恢复及暂缓回补。
 
 就绪模式复用同一 `SelectedProcessing` 和已用的 Python 3.14 标准库 [`ThreadPoolExecutor`](https://docs.python.org/3.14/library/concurrent.futures.html#threadpoolexecutor)（PSF 许可），不增加依赖和打包体积。池中仍只有网络、媒体两个长驻调用，各自逐档领取与交接；单档前置结果直接传给同通道的下一项工作，不为全库文件建立 future。阻塞的既有来源、探测和抽帧原语直接复用；纯 `asyncio` 编排仍需要线程适配这些调用，因此不另建事件循环或调度框架。任务控制通过 [`copy_context()`](https://docs.python.org/3.14/library/contextvars.html#contextvars.copy_context) 传递，适配当前固定的 Windows／Python 运行版本。逐档查询只取当前资产，候选 CSV 延续批量节流并在通道退出时保存；检查点只随已保存候选提交。隔离测试验证属性／预览与资料／封面交接顺序、跨通道独立性、疑似暂缓累计、停止／暂停及原配置持久保存。
+## 单档资料重新取证与同步保护
+
+资产详情复用 `LibraryMetadataProvider`、`_RemoteSession` 的按内容类型来源链、限流与取证预算，查询最新资料时忽略历史快照和缺失记忆；指定一家时只查询该来源。沿用现有自定义来源配置，不新增 HTTP 客户端或依赖。新取证以独立快照保存，页面按字段展示现值与来源原文，用户明确采用后才调用人工复核的身份核验、`write_owned_fields`、实体关系与批准回执。
+
+同步保护登记在 `review_decision.note.user_locked`，标量同时使用既有 `review:<来源>` 字段归属；自动结算在并集补标签、过期重判前保留这些字段。解除保护保留现值和来源回执，后续也可显式采用另一来源。候选快照号、资产路径、番号与 `mutation_revision` 联合防止过期页面或错片写入，多字段采用在同一事务内完成。后台查询复用 `BackgroundJob`、任务中心与重启恢复，落盘复用原子写入和现有 filelock；不增加迁移。
+
+来源偏好复用 `metadata_routes.parse_route_overrides`、内容类型裁剪与既有 HTTPX 客户端。保存的是本机内置来源的排列和经单行 ASCII 校验的 User-Agent，读取失败回到内置默认；显式任务路由仍覆盖对应类型。amane 桥通过既有 CLI 边界传递身分，薄适配器只在上游 `WebClient.request` 公开入口补请求头，不修改指纹、重试与限流策略。排序复用 `wireDragReorder` 并提供 Alt 与方向键操作。失败清单导出复用 `/api/library-processing/issues` 的任务号校验与分页响应，浏览器原生 Blob 下载 JSON，不引入导出库。
 
 ## 检查输入与源码文案
 

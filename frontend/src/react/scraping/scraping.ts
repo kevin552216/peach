@@ -4,6 +4,7 @@
  * 来源配置、封面任务、amane 桥和自定义来源各自缓存；后台任务按自己的节律读取状态，
  * 不重取正在编辑的来源配置。 */
 import { apiGet } from '../../api';
+import { METADATA_PREFERENCES_KEY, fetchMetadataPreferences } from './metadata-preferences-data';
 import { queryClient } from '../query';
 import { CUSTOM_SOURCES_KEY, fetchCustomSources } from './custom-source-data';
 
@@ -95,6 +96,7 @@ export async function prefetchScraping(signal: AbortSignal): Promise<void> {
     queryClient.fetchQuery({ queryKey: COVER_JOB_KEY, queryFn: () => fetchCoverJob(signal) }),
     queryClient.fetchQuery({ queryKey: AMANE_BRIDGE_KEY, queryFn: () => fetchAmaneBridge(signal) }),
     queryClient.fetchQuery({ queryKey: CUSTOM_SOURCES_KEY, queryFn: () => fetchCustomSources(signal) }),
+      queryClient.fetchQuery({ queryKey: METADATA_PREFERENCES_KEY, queryFn: () => fetchMetadataPreferences(signal) }),
   ]);
 }
 

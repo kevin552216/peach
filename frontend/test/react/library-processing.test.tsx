@@ -118,7 +118,8 @@ it('已停止后新任务可以只读取属性，逐项进度显示待确认预�
   await click(document.querySelector('dialog input[value="scan"]'));
   await click(document.querySelector('dialog input[value="metadata"]'));
   await submit(document.querySelector('dialog form'));
-  expect(served.posts()).toEqual([{ ...defaultRequest, tasks: ['probe'] }]);
+  expect(served.posts()).toEqual([{ tasks: ['probe'], execution_mode: 'sequential',
+    defer_suspected_duplicates: false, speed_mode: 'standard' }]);
   expect(host.querySelector('[aria-label="各项工作进度"]')?.textContent).toContain('读取媒体属性：正在处理 · 2 / 10 项');
 });
 

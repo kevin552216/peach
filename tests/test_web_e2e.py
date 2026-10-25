@@ -83,9 +83,15 @@ def load_demo_script():
 
 
 def free_port() -> int:
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    # 浏览器可访问的动态客户端端口，避开系统随机分配的受限制服务端口。
+    for port in range(49152, 65536):
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError('没有可用的浏览器测试端口')
 
 
 def refuse_network(*args, **kwargs):

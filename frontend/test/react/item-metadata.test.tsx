@@ -1,11 +1,25 @@
 import { notifyManager, QueryClientProvider } from '@tanstack/react-query';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { queryClient } from '../../src/react/query';
 import { ItemMetadata, type ItemMetadataData } from '../../src/react/item-detail/item-metadata';
 import { buttonNamed, click, mount, settle } from './render';
 
 notifyManager.setScheduler(callback => callback());
-afterEach(() => queryClient.clear());
+beforeEach(() => {
+  const matches = Element.prototype.matches;
+  vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+    return selector === ':popover-open' ? this.hasAttribute('data-test-popover-open') : matches.call(this, selector);
+  });
+  const prototype = HTMLElement.prototype as HTMLElement & Record<string, unknown>;
+  prototype.showPopover = function (this: HTMLElement) { this.setAttribute('data-test-popover-open', '') };
+  prototype.hidePopover = function (this: HTMLElement) { this.removeAttribute('data-test-popover-open') };
+});
+afterEach(() => {
+  queryClient.clear();
+  const prototype = HTMLElement.prototype as unknown as Record<string, unknown>;
+  delete prototype.showPopover;
+  delete prototype.hidePopover;
+});
 
 const state: ItemMetadataData = { id: 1, code: 'FC2-PPV-1234567', snapshot_id: 'snapshot', revision: 2,
   busy: false, sources: [{ id: 'fc2cmadb', label: 'FC2CMADB' }], issues: [], protected: [], job: { status: 'idle' },

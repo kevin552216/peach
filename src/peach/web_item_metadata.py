@@ -167,6 +167,8 @@ def _apply(contract, row, code, body):
             note = {**json.loads(decision['note']), 'user_locked': True, 'locked_at': now}
             connection.execute("UPDATE review_decision SET note=? WHERE category='metadata_fields' AND item_key=?",
                                (json.dumps(note, ensure_ascii=False), group['item_key']))
+        # 演员与标签是关系记录，保护状态同样需要让旧页面的并发凭据失效。
+        connection.execute('UPDATE asset SET mutation_revision=mutation_revision+1 WHERE id=?', (row['id'],))
     contract.cache_bust()
 
 

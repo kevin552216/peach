@@ -91,6 +91,16 @@ class ItemMetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.apply(state, ['title'])
 
+    def test_actor_only_adoption_invalidates_a_stale_page(self):
+        state = self.prepare()
+        result = self.apply(state, ['performers'])
+        self.assertGreater(result['revision'], state['revision'])
+        with self.assertRaises(ValueError):
+            self.apply(state, ['performers'])
+        with self.assertRaises(ValueError):
+            metadata.w_item_metadata(self.contract, {'id': 1, 'action': 'unlock', 'field': 'performers',
+                'expected_revision': state['revision']})
+
     def test_sync_preserves_locked_fields_even_when_candidates_change(self):
         state = self.prepare()
         self.apply(state, ['title', 'performers'])

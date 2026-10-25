@@ -4,7 +4,7 @@
  * `frontend/e2e/follow-feed.test.ts` 里量。 */
 import { notifyManager, QueryClientProvider, type InfiniteData } from '@tanstack/react-query';
 import { act, useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   FOLLOW_AUTO_LOAD_LIMIT, backfillState, dropCondition, followConditions, followPageUrl, followStack, groupMediaKinds, itemForMedia,
@@ -384,22 +384,35 @@ describe('页面', () => {
     expect(host.querySelector('input[type="search"]')).toBeNull();
   });
 
-  it(`摆满 ${FOLLOW_AUTO_LOAD_LIMIT} 组以后「加载更多」要点一下才接下一页`, async () => {
-    const groups = Array.from({ length: FOLLOW_AUTO_LOAD_LIMIT }, (_, index) => group(item(index + 1)));
-    const page = feed(groups, { has_more: true });
-    const fetcher = serve(page);
-    const host = await open(props());
-    const more = host.querySelector('[data-follow-pagination] button[data-entity-more]');
-    expect(more?.textContent).toBe('加载更多');
-    const before = fetcher.mock.calls.filter(([url]) => String(url).startsWith('/api/follow?')).length;
-    page.groups = [group(item(FOLLOW_AUTO_LOAD_LIMIT + 1))];
-    page.has_more = false;
-    await click(more);
-    await settle();
-    const pages = fetcher.mock.calls.filter(([url]) => String(url).startsWith('/api/follow?'));
-    expect(pages).toHaveLength(before + 1);
-    expect(new URL(String(pages.at(-1)![0]), 'http://peach.test').searchParams.get('offset')).toBe('100');
-    expect(host.querySelector(`[data-follow-item="${FOLLOW_AUTO_LOAD_LIMIT + 1}"]`)).not.toBeNull();
+  describe(`摆满 ${FOLLOW_AUTO_LOAD_LIMIT} 组的分页`, () => {
+    let host: HTMLElement;
+    let page: FollowPage;
+    let fetcher: ReturnType<typeof serve>;
+    // 高容量画面的建立使用 hook 时限，操作各自使用默认用例时限。
+    beforeEach(async () => {
+      const groups = Array.from({ length: FOLLOW_AUTO_LOAD_LIMIT }, (_, index) => group(item(index + 1)));
+      page = feed(groups, { has_more: true });
+      fetcher = serve(page);
+      host = await open(props());
+    }, 5000);
+
+    it('到达自动加载上限后展示手动入口', () => {
+      expect(cardIds(host)).toHaveLength(FOLLOW_AUTO_LOAD_LIMIT);
+      expect(host.querySelector('[data-follow-pagination] button[data-entity-more]')?.textContent).toBe('加载更多');
+    });
+
+    it('点击加载更多只请求下一页并展示新条目', async () => {
+      const more = host.querySelector('[data-follow-pagination] button[data-entity-more]');
+      const before = fetcher.mock.calls.filter(([url]) => String(url).startsWith('/api/follow?')).length;
+      page.groups = [group(item(FOLLOW_AUTO_LOAD_LIMIT + 1))];
+      page.has_more = false;
+      await click(more);
+      await settle();
+      const pages = fetcher.mock.calls.filter(([url]) => String(url).startsWith('/api/follow?'));
+      expect(pages).toHaveLength(before + 1);
+      expect(new URL(String(pages.at(-1)![0]), 'http://peach.test').searchParams.get('offset')).toBe('100');
+      expect(host.querySelector(`[data-follow-item="${FOLLOW_AUTO_LOAD_LIMIT + 1}"]`)).not.toBeNull();
+    });
   });
 
   it('没有关注任何来源时指到添加关注', async () => {

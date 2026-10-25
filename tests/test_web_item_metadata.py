@@ -46,7 +46,7 @@ class ItemMetadataTests(unittest.TestCase):
                 pass
         self.contract.item_metadata_job.state = {'job_id': 'fetch', 'status': 'running', 'asset_id': 1}
         with patch.object(metadata, '_SelectedSource', return_value=Remote()):
-            metadata._fetch(self.contract, 'fetch', row, code, 'fc2cmadb')
+            metadata._fetch(self.contract, 'fetch', row, code, ['fc2cmadb'])
         return self.read()
 
     def apply(self, state, fields):
@@ -58,6 +58,9 @@ class ItemMetadataTests(unittest.TestCase):
     def test_query_is_read_only_and_sources_match_the_release_system(self):
         result = self.read()
         self.assertIn('fc2cmadb', [source['id'] for source in result['sources']])
+        self.assertIn('fc2ppvdb', [source['id'] for source in result['sources']])
+        self.assertIn('javdb', [source['id'] for source in result['sources']])
+        self.assertIn('fc2club', [source['id'] for source in result['sources']])
         self.assertNotIn('dmm', [source['id'] for source in result['sources']])
         self.assertEqual(result['groups'], [])
         self.assertFalse(metadata._path(1).exists())
@@ -91,6 +94,54 @@ class ItemMetadataTests(unittest.TestCase):
         self.assertFalse(after['busy'])
         self.assertEqual(after['snapshot_id'], completed['snapshot_id'])
         self.assertTrue(after['groups'])
+
+    def test_requested_sources_reject_inapplicable_duplicate_and_malformed_choices(self):
+        available = {'fc2cmadb', 'fc2ppvdb'}
+        self.assertEqual(metadata._requested_sources({'sources': ['fc2ppvdb', 'fc2cmadb']}, available),
+                         ['fc2ppvdb', 'fc2cmadb'])
+        self.assertEqual(metadata._requested_sources({'sources': []}, available), [])
+        for sources in ('fc2cmadb', ['fc2cmadb', 'fc2cmadb'], ['dmm'], [True], [{}]):
+            with self.subTest(sources=sources), self.assertRaises(ValueError):
+                metadata._requested_sources({'sources': sources}, available)
+
+    def test_all_selected_sources_are_queried_and_candidates_keep_their_source(self):
+        row, code = metadata._asset(self.contract, 1)
+        queried = []
+
+        class Remote:
+            def __init__(_self, _config, source):
+                _self.source = source
+            def collect(_self, _row, _code, missing, _cover, *, received, issue, **options):
+                queried.append(_self.source)
+                self.assertFalse(options['include_covers'])
+                if _self.source == 'javdb':
+                    issue(_row, 'JavDB：HTTP 429，请稍后重试')
+                    return
+                payload = {'id': code, 'title': '来源标题', 'maker': '来源厂牌', 'release_date': '2024-01-01',
+                           'actresses': [{'japanese_name': _self.source + '艺名'}], 'genres': ['素人']}
+                received([(_self.source, payload, self.root / 'unused')])
+            def close(_self):
+                pass
+
+        selected = ['fc2cmadb', 'fc2ppvdb', 'javdb']
+        self.contract.item_metadata_job.state = {'job_id': 'multi', 'status': 'running', 'asset_id': 1}
+        with patch.object(metadata, '_SelectedSource', Remote):
+            metadata._fetch(self.contract, 'multi', row, code, selected)
+        after = self.read()
+        self.assertEqual(queried, selected)
+        cast = next(group for group in after['groups'] if group['field'] == 'performers')
+        self.assertEqual({choice['source'] for choice in cast['candidates']}, {'fc2cmadb', 'fc2ppvdb'})
+        self.assertEqual([(result['source'], result['status']) for result in after['source_results']],
+                         [('fc2cmadb', 'received'), ('fc2ppvdb', 'received'), ('javdb', 'unavailable')])
+        self.assertIn('429', after['issues'][0])
+        self.assertEqual(after['protected'], [])
+
+    def test_non_fc2_video_exposes_its_own_sources(self):
+        with self.contract.write_transaction() as connection:
+            connection.execute("UPDATE asset SET code='ABP-123' WHERE id=1")
+        sources = {source['id'] for source in self.read()['sources']}
+        self.assertTrue({'javdb', 'javbus', 'r18dev', 'dmm'}.issubset(sources))
+        self.assertNotIn('fc2cmadb', sources)
 
     def test_fetch_only_prepares_candidates_and_apply_is_scoped_and_protected(self):
         state = self.prepare()

@@ -78417,7 +78417,7 @@ function eHe({ id: e, onReceipt: t }) {
 		queryKey: n,
 		queryFn: ({ signal: t }) => H(`${OU}?id=${e}`, t),
 		refetchInterval: (e) => e.state.data?.busy ? 1500 : !1
-	}), [i, a] = (0, S.useState)(""), [o, s] = (0, S.useState)({}), c = hj(), l = r.data;
+	}), [i, a] = (0, S.useState)([]), [o, s] = (0, S.useState)({}), c = hj(), l = r.data;
 	(0, S.useEffect)(() => {
 		s({});
 	}, [l?.snapshot_id]);
@@ -78449,14 +78449,33 @@ function eHe({ id: e, onReceipt: t }) {
 		id: `item-metadata-${e}`,
 		className: "flex min-w-0 flex-col gap-3",
 		children: [
-			/* @__PURE__ */ (0, C.jsx)(_V, {
-				id: `metadata-source-${e}`,
-				label: "资料来源",
-				value: i,
-				epoch: l.sources.length,
-				disabled: f,
-				options: [["", "按默认来源顺序"], ...l.sources.map((e) => [e.id, e.label])],
-				onPick: a
+			/* @__PURE__ */ (0, C.jsxs)("fieldset", {
+				className: "flex min-w-0 flex-col gap-2",
+				children: [
+					/* @__PURE__ */ (0, C.jsx)("legend", {
+						className: "mb-2",
+						children: "资料来源（可多选）"
+					}),
+					/* @__PURE__ */ (0, C.jsx)("div", {
+						className: "flex flex-wrap gap-x-4 gap-y-2",
+						children: l.sources.map((e) => /* @__PURE__ */ (0, C.jsx)(mF, {
+							isSelected: i.includes(e.id),
+							isDisabled: f,
+							onChange: (t) => a((n) => t ? [...n, e.id] : n.filter((t) => t !== e.id)),
+							children: e.label
+						}, e.id))
+					}),
+					/* @__PURE__ */ (0, C.jsx)("span", {
+						className: "text-body-2-regular text-text-secondary",
+						children: i.length ? `将逐一查询所选的 ${i.length} 家来源，再选择要采用的资料。` : "未指定来源时按默认顺序查询，资料足够即停止。"
+					}),
+					i.length ? /* @__PURE__ */ (0, C.jsx)(q, {
+						variant: "secondary",
+						disabled: f,
+						onClick: () => a([]),
+						children: "使用默认来源顺序"
+					}) : null
+				]
 			}),
 			/* @__PURE__ */ (0, C.jsx)(q, {
 				variant: "secondary",
@@ -78464,7 +78483,7 @@ function eHe({ id: e, onReceipt: t }) {
 				...Y(c.busy === "fetch"),
 				onClick: () => u("fetch", {
 					action: "fetch",
-					source: i
+					sources: i
 				}),
 				children: "查询最新资料"
 			}),
@@ -78481,6 +78500,15 @@ function eHe({ id: e, onReceipt: t }) {
 				tone: "warning",
 				children: e
 			}, t)),
+			!d && l.source_results?.length ? /* @__PURE__ */ (0, C.jsx)("ul", {
+				"aria-label": "所选来源查询结果",
+				className: "flex flex-col gap-1",
+				children: l.source_results.map((e) => /* @__PURE__ */ (0, C.jsxs)("li", { children: [
+					p.get(e.source) || e.source,
+					"：",
+					e.status === "received" ? "已取得资料" : "未取得资料，请查看原因或稍后重试"
+				] }, e.source))
+			}) : null,
 			!d && l.snapshot_id && !l.groups.length && !l.issues.length ? /* @__PURE__ */ (0, C.jsx)(J, {
 				tone: "neutral",
 				children: "所选来源没有提供可采用的资料，可换一个来源查询。"

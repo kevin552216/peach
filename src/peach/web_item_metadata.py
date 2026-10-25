@@ -55,6 +55,8 @@ def _sources(row, code):
     sources = [(name, engine.SOURCE_LABELS.get(name, name)) for name in
                metadata_routes.route_for_code(code, *engine._studio_evidence(row),
                    overrides=preferences(settings_file.active().directory('secrets'))['routes'])]
+    if kind == 'fc2' and 'fc2club' not in {name for name, _ in sources}:
+        sources.append(('fc2club', engine.SOURCE_LABELS['fc2club']))
     sources += [(source_key(entry), entry['name']) for entry in load(settings_file.active().directory('secrets'))
                 if entry['enabled'] and kind in entry['content_types']]
     return sources
@@ -93,7 +95,7 @@ def q_item_metadata(contract, args):
     return {'id': row['id'], 'code': code, 'sources': [{'id': key, 'label': label} for key, label in _sources(row, code)],
             'snapshot_id': saved.get('snapshot_id', ''), 'fetched_at': saved.get('fetched_at'),
             'revision': row['mutation_revision'], 'groups': groups, 'protected': protected,
-            'issues': saved.get('issues', []),
+            'issues': saved.get('issues', []), 'source_results': saved.get('source_results', []),
             'job': job if job.get('asset_id') == row['id'] else {'status': 'idle'},
             'busy': job.get('status') == 'running'}
 
@@ -105,38 +107,61 @@ class _SelectedSource(engine._RemoteSession):
         super().__init__(config, None, engine._MissCache(engine.misses_path(config)), retrying=True)
         self.selected_source = source
 
+    def _ask(self, source, code, members, cached, **options):
+        if self.selected_source:
+            kind = metadata_routes.classify(code, *options['evidence'])
+            self._routes = {**(self._routes or {}), kind: (self.selected_source,)}
+        return super()._ask(source, code, members, cached, **options)
+
     def _chain(self, code, *evidence):
         return (self.selected_source,) if self.selected_source else super()._chain(code, *evidence)
 
 
-def _fetch(contract, job_id, row, code, source):
+def _fetch(contract, job_id, row, code, sources):
     config = settings_file.active()
-    remote = _SelectedSource(config, source)
     issues, groups = [], {}
+    outcomes, answered = [], set()
     snapshot_id = uuid4().hex
     with contract.read_connection() as connection:
         genres = load_genre_decisions(connection)
     def received(entries):
         for name, payload, _ in entries:
+            answered.add(name)
             path = config.directory('sources') / 'item-metadata' / snapshot_id / f'{name}.json'
             atomic_write_text(path, json.dumps(payload, ensure_ascii=False))
             # 每个字段都可供明确采用，包括与当前值相同而需要加上保护的值。
             baseline = {**row, **{engine.COLUMN_OF.get(field, field): '' for field in engine.LABELS}}
             engine._merge_candidates(groups, baseline, code, name, payload, path, genres)
-    try:
-        remote.collect(row, code, list(engine.COLLECTED_FIELDS), contract.cover_root,
-            include_covers=False, received=received,
-            update=lambda **state: contract.item_metadata_job.update(job_id, **state),
-            issue=lambda _row, message, **_details: issues.append(str(message)))
-        result = {'snapshot_id': snapshot_id, 'code': code, 'asset_path': row['path'],
-                  'fetched_at': time.time(), 'groups': list(groups.values()), 'issues': issues}
-        path = _path(row['id'])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(str(path) + '.lock'):
-            atomic_write_text(path, json.dumps(result, ensure_ascii=False))
-        contract.item_metadata_job.update(job_id, status='complete', stage='等待选择采用的资料')
-    finally:
-        remote.close()
+    for source in sources or ('',):
+        remote = _SelectedSource(config, source)
+        before = len(issues)
+        try:
+            remote.collect(row, code, list(engine.COLLECTED_FIELDS), contract.cover_root,
+                include_covers=False, received=received,
+                update=lambda **state: contract.item_metadata_job.update(job_id, **state),
+                issue=lambda _row, message, **_details: issues.append(str(message)))
+        finally:
+            remote.close()
+        if source:
+            outcomes.append({'source': source, 'status': 'received' if source in answered else 'unavailable',
+                             'issues': issues[before:]})
+    result = {'snapshot_id': snapshot_id, 'code': code, 'asset_path': row['path'],
+              'fetched_at': time.time(), 'groups': list(groups.values()), 'issues': issues,
+              'source_results': outcomes}
+    path = _path(row['id'])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + '.lock'):
+        atomic_write_text(path, json.dumps(result, ensure_ascii=False))
+    contract.item_metadata_job.update(job_id, status='complete', stage='等待选择采用的资料')
+
+
+def _requested_sources(body, available):
+    sources = body.get('sources', [body['source']] if body.get('source') else [])
+    if (not isinstance(sources, list) or len(sources) > len(available)
+            or any(not isinstance(source, str) or source not in available for source in sources)
+            or len(set(sources)) != len(sources)):
+        raise ValueError('请选择适用于该影片的来源，每家一次')
+    return sources
 
 
 def _apply(contract, row, code, body):
@@ -215,15 +240,13 @@ def w_item_metadata(contract, body):
         with FileLock(str(path) + '.lock'):
             (_apply(contract, row, code, body) if action == 'apply' else _unlock(contract, row, body))
     elif action == 'fetch':
-        source = body.get('source') or ''
-        if not isinstance(source, str) or source and source not in {key for key, _ in _sources(row, code)}:
-            raise ValueError('这个来源不适用于该影片')
+        sources = _requested_sources(body, {key for key, _ in _sources(row, code)})
         job = contract.item_metadata_job.snapshot() or {}
         if job.get('status') == 'running':
             raise ValueError('另一项单档资料查询正在进行，请稍后重试')
-        contract.item_metadata_job.start(lambda job_id: _fetch(contract, job_id, row, code, source),
-            restart=True, initial={'asset_id': row['id'], 'source': source, 'stage': '重新查询资料来源'},
-            recovery={'id': row['id'], 'source': source})
+        contract.item_metadata_job.start(lambda job_id: _fetch(contract, job_id, row, code, sources),
+            restart=True, initial={'asset_id': row['id'], 'sources': sources, 'stage': '重新查询资料来源'},
+            recovery={'id': row['id'], 'sources': sources})
     else:
         raise ValueError('资料操作无效')
     return q_item_metadata(contract, {'id': row['id']})

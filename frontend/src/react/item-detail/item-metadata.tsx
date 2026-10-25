@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/base/buttons/button';
+import { Checkbox } from '@/components/base/checkbox/checkbox';
 import { apiGet, apiSend } from '../../api';
 import { LoadingDots } from '../components/loading-dots';
 import { Note } from '../components/note';
@@ -18,6 +19,7 @@ export interface ItemMetadataData {
   }[] }[];
   protected: { field: string; label: string; source: string }[];
   issues: string[];
+  source_results?: { source: string; status: string; issues: string[] }[];
   job: { status: string; stage?: string; error?: string };
 }
 
@@ -36,7 +38,7 @@ function MetadataPanel({ id, onReceipt }: { id: number; onReceipt(message: strin
   const query = useQuery({ queryKey: key,
     queryFn: ({ signal }) => apiGet<ItemMetadataData>(`${ITEM_METADATA_URL}?id=${id}`, signal),
     refetchInterval: result => result.state.data?.busy ? 1500 : false });
-  const [source, setSource] = useState('');
+  const [sources, setSources] = useState<string[]>([]);
   const [choices, setChoices] = useState<Record<string, string>>({});
   const action = useAction();
   const data = query.data;
@@ -61,15 +63,30 @@ function MetadataPanel({ id, onReceipt }: { id: number; onReceipt(message: strin
   const selected = Object.fromEntries(Object.entries(choices).filter(([, value]) => value));
   const problem = action.error || (data.job.status === 'failed' ? data.job.error : '');
   return <div id={`item-metadata-${id}`} className="flex min-w-0 flex-col gap-3">
-    <SelectField id={`metadata-source-${id}`} label="资料来源" value={source} epoch={data.sources.length}
-      disabled={busy} options={[["", '按默认来源顺序'], ...data.sources.map(entry => [entry.id, entry.label] as const)]}
-      onPick={setSource} />
+    <fieldset className="flex min-w-0 flex-col gap-2">
+      <legend className="mb-2">资料来源（可多选）</legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        {data.sources.map(source => <Checkbox key={source.id} isSelected={sources.includes(source.id)} isDisabled={busy}
+          onChange={checked => setSources(previous => checked ? [...previous, source.id] : previous.filter(value => value !== source.id))}>
+          {source.label}
+        </Checkbox>)}
+      </div>
+      <span className="text-body-2-regular text-text-secondary">
+        {sources.length ? `将逐一查询所选的 ${sources.length} 家来源，再选择要采用的资料。` : '未指定来源时按默认顺序查询，资料足够即停止。'}
+      </span>
+      {sources.length ? <Button variant="secondary" disabled={busy} onClick={() => setSources([])}>使用默认来源顺序</Button> : null}
+    </fieldset>
     <Button variant="secondary" disabled={data.busy} {...busyProps(action.busy === 'fetch')}
-      onClick={() => submit('fetch', { action: 'fetch', source })}>查询最新资料</Button>
+      onClick={() => submit('fetch', { action: 'fetch', sources })}>查询最新资料</Button>
     {running ? <LoadingDots label={data.job.stage || '正在查询资料来源'} /> : null}
     {data.busy && !running ? <Note tone="neutral">另一项单档资料查询正在进行，请稍后重试。</Note> : null}
     {problem ? <Note tone="warning">{problem}</Note> : null}
     {!running ? data.issues.map((issue, index) => <Note key={index} tone="warning">{issue}</Note>) : null}
+    {!running && data.source_results?.length ? <ul aria-label="所选来源查询结果" className="flex flex-col gap-1">
+      {data.source_results.map(result => <li key={result.source}>
+        {labels.get(result.source) || result.source}：{result.status === 'received' ? '已取得资料' : '未取得资料，请查看原因或稍后重试'}
+      </li>)}
+    </ul> : null}
     {!running && data.snapshot_id && !data.groups.length && !data.issues.length
       ? <Note tone="neutral">所选来源没有提供可采用的资料，可换一个来源查询。</Note> : null}
     {!running ? data.groups.map(group => <div key={group.field} className="flex min-w-0 flex-col gap-1">

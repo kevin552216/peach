@@ -21,7 +21,7 @@ import httpx
 from .follow_secrets import CredentialStore
 from . import browser_transport, peach_proxy
 from .http import HttpRequest, HttpxTransport
-from .scripting import USER_AGENT, host_under, hostname_of
+from .scripting import host_under, hostname_of
 from .fsutil import atomic_write_text
 
 LOGGER = logging.getLogger(__name__)

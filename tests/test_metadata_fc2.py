@@ -307,6 +307,8 @@ class Fc2MirrorPageTests(unittest.TestCase):
         transport = serve({url: lambda headers: None if headers.get("X-Inertia") else mirror_page()})
         found = Fc2cmadbSource().query("FC2-PPV-3189161", session=Session(transport))
         self.assertEqual((found.title, found.performers), ("【無】コスプレシリーズ", ()))
+        self.assertEqual(found.payload()['incomplete_fields'], ['performers'])
+        self.assertTrue(found.payload()['source_warnings'])
         self.assertEqual(len(transport.calls), 2)
 
     def test_the_second_ask_names_this_page_and_only_the_column_it_wants(self):

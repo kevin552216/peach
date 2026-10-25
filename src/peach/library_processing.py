@@ -1115,6 +1115,16 @@ def _given_fields(entries):
                  or _usable_fc2_cast(payload))}
 
 
+def _report_incomplete_metadata(row, entries, required, issue):
+    """必填栏仍未取得时登记可重试问题，已取得的其他资料照常保存。"""
+    missing = set(required) - _given_fields(entries)
+    for source, payload, _ in entries:
+        if missing.intersection(payload.get('incomplete_fields') or ()):
+            warnings = payload.get('source_warnings') or ['缺失资料暂未取得']
+            issue(row, f"{SOURCE_LABELS.get(source, source)}：{'；'.join(warnings)}",
+                  action='querying_metadata', retryable=True, paused=bool(payload.get('source_paused')))
+
+
 def _asks_cover(code, *evidence):
     """这个番号要不要问外部封面。韩国 MIB 与国产、欧美（`metadata_routes` 的 `other`）不问：
     JAV 的封面来源按这种号查，要么查空，要么取回同号的另一部日本片。"""
@@ -1364,12 +1374,13 @@ class _RemoteSession:
     def _evidence_path(self, code, source):
         return self._config.directory('sources') / 'library-metadata' / f'{code}-{source}.json'
 
-    def _cached_evidence(self, names, code):
+    def _cached_evidence(self, names, code, *, required=()):
         """这一档上次答过的原始快照；命中就不发请求。
 
         有效期与「说过没有」的记忆同一个（`MISS_TTL_SECONDS`，7 天）：来源会补录、
         片子可能后来上架，两边同时到期才不会出现「没有」已经过期、「有」还压着旧值。
         重试时首个同番号资产取得新答复，本趟的其他资产复用该答复。
+        磁盘快照中仍待补的必填字段交给来源重新查询，其余消费者可复用已取得内容。
         """
         found = []
         for name in names:
@@ -1383,6 +1394,8 @@ class _RemoteSession:
                 if time.time() - path.stat().st_mtime > MISS_TTL_SECONDS:
                     continue
                 entry = (name, json.loads(path.read_text(encoding='utf-8')), path)
+                if set(required).intersection(entry[1].get('incomplete_fields') or ()):
+                    continue
                 self._task_evidence[name, code] = entry
                 found.append(entry)
             except (OSError, ValueError):
@@ -1482,7 +1495,7 @@ class _RemoteSession:
             if not members:
                 continue
             attempted.update(members)
-            cached = self._cached_evidence(members, code)
+            cached = self._cached_evidence(members, code, required=required)
             if cached:
                 results.cached(cached)
                 if metadata_routes.settles(required, _given_fields(entries),
@@ -1523,6 +1536,7 @@ class _RemoteSession:
             update=update, issue=issue, deadline=_extended(deadline, _excused(self._provider) - mark))
         results.cached(tag_entries)
         if entries:
+            _report_incomplete_metadata(row, entries, required, issue)
             return entries
         # 链上任何一档还在正常作答，这一行就是真没取到；全被限住时才算没轮到。
         paused = bool(held) and all(held)

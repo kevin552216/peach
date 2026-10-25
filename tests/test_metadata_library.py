@@ -2017,6 +2017,52 @@ class LibraryNfoTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT e.canonical_name FROM asset_entity ae "
                 "JOIN entity e ON e.id=ae.entity_id WHERE ae.role='performer'").fetchall(), [('梨奈',)])
 
+    def test_an_incomplete_cast_snapshot_is_reusable_for_covers_and_requeried_for_cast(self):
+        from peach.library_processing import _RemoteSession, _MissCache, misses_path
+        code = 'FC2-PPV-2851534'
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True)
+        partial = dict(id=code, title='测试作品', actresses=[], incomplete_fields=['performers'])
+        path = config.directory('sources') / 'library-metadata' / (code + '-fc2cmadb.json')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(partial), encoding='utf-8')
+        provider = stub_provider()
+        factory = Mock(return_value=provider)
+        cover_session = _RemoteSession(config, factory, _MissCache(misses_path(config)), retrying=False)
+        try:
+            self.assertEqual(cover_session._cached_evidence(('fc2cmadb',), code)[0][1], partial)
+            factory.assert_not_called()
+        finally:
+            cover_session.close()
+        provider.fc2.return_value = [('fc2cmadb', dict(id=code, actresses=[{'japanese_name': '梨奈'}]))]
+        session = _RemoteSession(config, factory, _MissCache(misses_path(config)), retrying=False)
+        try:
+            entries = session._metadata({}, code, ['performers'], update=Mock(), issue=Mock())
+            provider.fc2.assert_called_once()
+            self.assertEqual(provider.fc2.call_args.kwargs['known'], [])
+            self.assertEqual(entries[0][1]['actresses'], [{'japanese_name': '梨奈'}])
+        finally:
+            session.close()
+
+    def test_an_unavailable_cast_column_is_retryable_while_other_metadata_is_saved(self):
+        from peach.library_processing import _RemoteSession, _MissCache, misses_path
+        code = 'FC2-PPV-2851534'
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True)
+        partial = dict(id=code, title='测试作品', actresses=[], incomplete_fields=['performers'],
+                       source_warnings=['演员栏未取得：来源限流'], source_paused=True)
+        provider = stub_provider()
+        provider.fc2.return_value = [('fc2cmadb', partial)]
+        session = _RemoteSession(config, Mock(return_value=provider), _MissCache(misses_path(config)), retrying=False)
+        issue = Mock()
+        try:
+            entries = session._metadata({}, code, ['performers'], update=Mock(), issue=issue)
+            self.assertEqual(entries[0][1]['title'], '测试作品')
+            self.assertTrue(entries[0][2].is_file())
+            issue.assert_called_once()
+            self.assertTrue(issue.call_args.kwargs['retryable'])
+            self.assertTrue(issue.call_args.kwargs['paused'])
+        finally:
+            session.close()
+
     @windows_ledger_roots
     def test_a_pending_candidate_skips_only_the_source_that_gave_it(self):
         """演员栏只有 fc2cmadb 一条待批候选：重跑时照样去问演员，只是不再问 fc2cmadb。

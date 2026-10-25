@@ -9,7 +9,7 @@
 
 这一站另有一栏对得上人的女優，那是 Inertia 的延迟 prop——首屏那份 HTML 里没有，要带上
 这一页自报的握手版本号把这一栏单独再问一次才给（`partial_headers`），一次一千来字节，还附
-一串曾用名。`query()` 在解析出作品之后补这一跳；问不出来就按没有女优落。浏览器里这一栏只对
+一串曾用名。`query()` 在解析出作品之后补这一跳；未取得的栏位标记待补，已有作品资料保留。浏览器里这一栏只对
 登录用户显示；2026-09-23 实测游客补问也照样回（`2851534`、`3518061` 两边一致），带 Cookie
 是为站方收紧游客访问时不断档。
 
@@ -255,15 +255,16 @@ class Fc2cmadbSource(SiteSource):
             cover_urls=[storage_original(article.get("image_url"))])
 
     def with_actresses(self, record: SiteRecord, page: Page, *, session: Session) -> SiteRecord:
-        """点名 `actresses` 把女优那一栏再问一次。那一跳撞上冷却或限流是常事，其余字段是站上最全的
-        一份，不跟着丢：问不出来就按没有女优交回。"""
+        """点名取得延迟的女优栏。未取得时保留其他字段，并标记待补字段与来源警告。"""
         headers = partial_headers(page.body)
         if not headers:
             return record
         try:
             partial = session.get(page.url, config=self.config, referer=page.url, headers=headers).body
-        except (SourcePaused, Unavailable):
-            return record
+        except (SourcePaused, Unavailable) as error:
+            return replace(record, extra={**record.extra, 'incomplete_fields': ['performers'],
+                'source_warnings': [f'演员栏未取得：{error}'],
+                'source_paused': isinstance(error, SourcePaused)})
         return replace(record, performers=tuple(parse_actresses(partial)))
 
     def query(self, code: str, *, session: Session) -> SiteRecord:

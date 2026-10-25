@@ -93,6 +93,7 @@ describe('关注页岛', () => {
         await page.reload({ waitUntil: 'networkidle' });
         assert.equal(await page.getByRole('searchbox', { name: '搜索创作者' }).count(), 0);
         const author = page.locator('[data-follow-authors] a[data-follow-author="name:kou"]');
+        await author.waitFor({ state: 'visible' });
         assert.equal(await author.count(), 1);
         assert.equal(await author.getAttribute('href'), '/creators/90101');
         assert.equal(await author.getAttribute('aria-pressed'), null);

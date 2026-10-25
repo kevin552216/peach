@@ -9,6 +9,14 @@ import time
 from pathlib import Path
 
 
+def assert_bridge_resources():
+    """已安装 wheel 的桥脚本、清单与锁来自发行资源。"""
+    from peach.metadata_amane import BRIDGE_ROOT
+    assert '_resources' in BRIDGE_ROOT.parts, BRIDGE_ROOT
+    for name in ('bridge.py', 'pyproject.toml', 'uv.lock'):
+        assert (BRIDGE_ROOT / name).is_file(), BRIDGE_ROOT / name
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="peach-wheel-") as directory:
         root = Path(directory).resolve()
@@ -32,6 +40,7 @@ def main():
         from peach.migrations import upgrade
         assert "site-packages" in Path(peach.__file__).parts, peach.__file__
         assert "_resources" in MIGRATIONS_DIR.parts, MIGRATIONS_DIR
+        assert_bridge_resources()
         database = root / "ledger.db"
         assert upgrade(database, MIGRATIONS_DIR)
         settings = PeachSettings(db_path=database, configured=True, token="wheel-smoke")

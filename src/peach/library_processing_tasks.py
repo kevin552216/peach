@@ -63,6 +63,7 @@ class SelectedProcessing:
     def __init__(self, config, db_path, candidate_root, cover_root, selection, options):
         self.config, self.db, self.candidate_root, self.cover_root = config, db_path, candidate_root, cover_root
         self.options, self.selection = options, selection
+        self.metadata_selection = engine.MetadataSelection(options.get('metadata_fields'), options.get('fill_other_metadata', True))
         self.tasks = list(selection['tasks'])
         self.database = options.get('database')
         if self.database is None and selection['legacy_policy'] and options.get('stage') != 'previews':
@@ -113,6 +114,7 @@ class SelectedProcessing:
             started_at=time.time(), last_progress_at=time.time(), progress_seq=0,
             current_asset_id=None, current_asset_name='', current_action='', current_started_at=None, current_deadline_at=None)
         state.update(initial_estimate(self.config, self.db, state['requested_stage'], self.scope, self.mode, tasks=self.tasks))
+        state.update(self.metadata_selection.options)
         state['steps'] = engine._processing_steps(state['requested_stage'], self.scope,
             metadata_only_enabled=metadata_only(self.config.directory('state')), tasks=self.tasks)
         state['work_progress'] = {task: dict(status='pending', done=0, total=0, failed=0, deferred=0) for task in self.tasks}
@@ -123,7 +125,7 @@ class SelectedProcessing:
         with self.lock:
             task = getattr(self.local, 'task', None)
             if getattr(self.local, 'pipeline', False) and task in self.local.unit_done:
-                values.update(checked=self.local.unit_done[task], total=len(self.rows))
+                values.update(checked=self.local.unit_done[task], total=self.task_total(task))
             resume_fields(self.state, values)
             self.state.update(values)
             self.state['speed_mode'] = self.control.mode if self.control else self.mode
@@ -199,7 +201,7 @@ class SelectedProcessing:
         self.local.task = task
         try:
             self.task_state(task, 'running')
-            self.update(stage=LABELS[task], checked=0, total=len(self.rows))
+            self.update(stage=LABELS[task], checked=0, total=self.task_total(task))
             if row is None:
                 getattr(self, 'do_' + task)()
                 self.task_state(task, 'complete')
@@ -231,9 +233,15 @@ class SelectedProcessing:
         self.rows, self.genres = engine._collection_rows(self.db, locations=self.locations, online_roots=self.roots, asset_ids=self.scope)
         self.pending = engine._processing_workload(self.config, self.rows, self.state['requested_stage'],
             self.database, self.checkpoints.completed['completed_previews'], tasks=self.tasks)
+        selected = self.metadata_selection.rows(self.rows, self.state)
+        if self.metadata_selection.fields is not None and 'metadata' in self.pending:
+            self.pending['metadata'] = len(selected)
         with self.lock:
             for task, total in self.pending.items():
                 self.state['work_progress'][task]['total'] = total
+
+    def task_total(self, task):
+        return self.state.get('metadata_eligible', len(self.rows)) if task == 'metadata' else len(self.rows)
 
     def run(self):
         with (activity(self.db, 'library-processing'),
@@ -290,8 +298,9 @@ class SelectedProcessing:
         if metadata is None:
             return
         summary = engine._finish_collection(self.config, self.database, self.candidate_root, self.cover_root,
-            metadata.groups, self.get_remote(), asset_ids=self.scope, active=self.active,
-            update=self.update, issue=self.issue, watermark=self.checkpoints.entity_watermark, covered=self.covered)
+            metadata.groups, self.get_remote(), asset_ids=self.metadata_selection.scope(self.scope), active=self.active,
+            update=self.update, issue=self.issue, watermark=self.checkpoints.entity_watermark, covered=self.covered,
+            metadata_selection=self.metadata_selection)
         summary['auto_applied'] = summary.get('auto_applied', 0) + self.state['auto_applied']
         summary['auto_rejected'] = summary.get('auto_rejected', 0) + self.state['auto_rejected']
         self.publish(**summary)
@@ -310,6 +319,8 @@ class SelectedProcessing:
         try:
             for item in self.rows:
                 for task in tasks:
+                    if task == 'metadata' and self.metadata_selection.fields is not None and item['id'] not in self.metadata_selection.scope(self.scope):
+                        continue
                     if self.cancel.is_set():
                         return
                     self.local.task = task
@@ -444,6 +455,7 @@ class MetadataWork:
 
     def __init__(self, runner):
         self.runner = runner
+        self.selection = runner.metadata_selection
         self.output = runner.candidate_root / 'library-metadata-field-candidates.csv'
         self.groups = {row['item_key']: row for row in read_rows(self.output, missing_ok=True)}
         self.listing = runner.directory_index
@@ -463,7 +475,7 @@ class MetadataWork:
                     for field in engine.LABELS if field not in eligible}
         for source, document, path in entries:
             engine._merge_candidates(self.groups, row, code, source, document, path, self.runner.genres,
-                                     local_fields, verify_existing=verify_existing)
+                                     local_fields, verify_existing=verify_existing, only_fields=self.selection.allowed)
         for key, value in retained.items():
             if value is None:
                 self.groups.pop(key, None)
@@ -471,7 +483,7 @@ class MetadataWork:
                 self.groups[key] = value
         selected = [item for item in self.groups.values() if str(item.get('asset_id')) == str(row['id']) and item['field'] in eligible]
         result = engine._apply_finished_candidates(self.runner.database, self.runner.candidate_root, self.runner.active,
-                                                   [row['id']], selected)
+                                                   [row['id']], selected, **self.selection.apply_options)
         with self.runner.lock:
             self.runner.state['auto_applied'] += result['applied']
             self.runner.state['auto_rejected'] += result['auto_rejected']
@@ -488,6 +500,8 @@ class MetadataWork:
                 self.runner.checkpoints.commit_metadata(self.runner.flush)
 
     def local(self, row):
+        if self.selection.fields is not None and not self.selection.wanted(row, ()):
+            return None
         if not self.runner.selection['legacy_policy'] and not engine._missing_fields(row):
             return None
         failed_before = self.runner.state['work_progress']['metadata']['failed']
@@ -495,7 +509,7 @@ class MetadataWork:
         if result is None:
             return None
         code, verify_existing, payload, entries = result
-        verify_existing = verify_existing and self.runner.selection['legacy_policy']
+        verify_existing = self.selection.verify(verify_existing and self.runner.selection['legacy_policy'])
         fields = engine._fields(payload, self.runner.genres) if payload else {}
         self.publish(row, code, fields, entries, verify_existing)
         local_ok = failed_before == self.runner.state['work_progress']['metadata']['failed']
@@ -503,7 +517,8 @@ class MetadataWork:
 
     def run(self):
         runner = self.runner
-        rows = list(runner.checkpoints.remaining_metadata(runner.current_rows()))
+        selected = self.selection.rows(runner.current_rows(), runner.state)
+        rows = list(runner.checkpoints.remaining_metadata(selected))
         prepared = []
         try:
             for index, (_, row) in enumerate(rows):
@@ -519,7 +534,7 @@ class MetadataWork:
                 runner.update(stage='采集缺失资料', checked=index, total=len(prepared),
                               current_asset_id=row['id'], current_asset_name=row['name'])
                 self.collect(local)
-                runner.publish(checked=index + 1, candidates=len(engine._candidate_scope(self.groups, runner.scope)))
+                runner.publish(checked=index + 1, candidates=self.candidate_count())
         finally:
             self.flush(force=True)
 
@@ -533,14 +548,17 @@ class MetadataWork:
         if prepared is not None:
             runner.update(stage='采集缺失资料')
             self.collect(prepared)
-        runner.publish(candidates=len(engine._candidate_scope(self.groups, runner.scope)))
+        runner.publish(candidates=self.candidate_count())
+
+    def candidate_count(self):
+        return len(engine._candidate_scope(self.selection.groups(self.groups), self.selection.scope(self.runner.scope)))
 
     def collect(self, prepared):
         runner = self.runner
         row, code, fields, entries, verify_existing, local_ok = prepared
         issues = runner.state['work_progress']['metadata']['failed']
-        missing = list(engine.COLLECTED_FIELDS) if verify_existing else engine._missing_fields(row, fields)
-        found, _ = runner.get_remote().collect(row, code, missing, runner.cover_root,
+        missing = self.selection.wanted(row, fields, verify_existing, database=runner.database, code=code)
+        found, _ = self.selection.collect(runner.get_remote(), row, code, missing, runner.cover_root,
             update=runner.update, issue=runner.issue, include_covers=False,
             answered=() if verify_existing else engine._answered_sources(self.groups, f"asset:{row['id']}", missing),
             received=lambda entries: self.publish(row, code, fields, entries, verify_existing))

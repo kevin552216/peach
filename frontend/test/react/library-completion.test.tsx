@@ -63,9 +63,11 @@ it('默认补全与下拉分项都只提交当前缺图影片，菜单包含主�
     await click(buttonNamed(label, menu));
   }
   expect(posts).toEqual([
-    { stage: 'collect', tasks: ['metadata', 'covers', 'previews'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'standard', asset_ids: [7, 8] },
+    { stage: 'collect', tasks: ['metadata', 'covers', 'previews'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'standard', asset_ids: [7, 8],
+      metadata_fields: ['title', 'performers', 'studio', 'release_date', 'tags'], fill_other_metadata: true },
     { stage: 'previews', tasks: ['previews'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'low', asset_ids: [7, 8] },
-    { stage: 'metadata', tasks: ['metadata'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'standard', asset_ids: [7, 8] },
+    { stage: 'metadata', tasks: ['metadata'], execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode: 'standard', asset_ids: [7, 8],
+      metadata_fields: ['title', 'performers', 'studio', 'release_date', 'tags'], fill_other_metadata: true },
   ]);
 });
 

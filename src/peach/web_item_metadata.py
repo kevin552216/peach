@@ -12,6 +12,7 @@ from .field_owners import check_revision, parse_owners, review_owner
 from .fsutil import atomic_write_text
 from .genre_decisions import load_genre_decisions
 from .metadata_auto_apply import METADATA_FIELD_COLUMNS, _decision_note
+from .metadata_selection import MetadataSelection, request_options
 from .web_review import _approve_metadata_with_receipt
 
 
@@ -117,8 +118,9 @@ class _SelectedSource(engine._RemoteSession):
         return (self.selected_source,) if self.selected_source else super()._chain(code, *evidence)
 
 
-def _fetch(contract, job_id, row, code, sources):
+def _fetch(contract, job_id, row, code, sources, metadata_fields=None, fill_other_metadata=True):
     config = settings_file.active()
+    selection = MetadataSelection(metadata_fields, fill_other_metadata)
     issues, groups = [], {}
     outcomes, answered = [], set()
     snapshot_id = uuid4().hex
@@ -131,12 +133,13 @@ def _fetch(contract, job_id, row, code, sources):
             atomic_write_text(path, json.dumps(payload, ensure_ascii=False))
             # 每个字段都可供明确采用，包括与当前值相同而需要加上保护的值。
             baseline = {**row, **{engine.COLUMN_OF.get(field, field): '' for field in engine.LABELS}}
-            engine._merge_candidates(groups, baseline, code, name, payload, path, genres)
+            engine._merge_candidates(groups, baseline, code, name, payload, path, genres,
+                                     only_fields=selection.allowed)
     for source in sources or ('',):
         remote = _SelectedSource(config, source)
         before = len(issues)
         try:
-            remote.collect(row, code, list(engine.COLLECTED_FIELDS), contract.cover_root,
+            remote.collect(row, code, list(selection.fields or engine.COLLECTED_FIELDS), contract.cover_root,
                 include_covers=False, received=received,
                 update=lambda **state: contract.item_metadata_job.update(job_id, **state),
                 issue=lambda _row, message, **_details: issues.append(str(message)))
@@ -147,7 +150,7 @@ def _fetch(contract, job_id, row, code, sources):
                              'issues': issues[before:]})
     result = {'snapshot_id': snapshot_id, 'code': code, 'asset_path': row['path'],
               'fetched_at': time.time(), 'groups': list(groups.values()), 'issues': issues,
-              'source_results': outcomes}
+              'source_results': outcomes, **selection.options}
     path = _path(row['id'])
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + '.lock'):
@@ -241,12 +244,13 @@ def w_item_metadata(contract, body):
             (_apply(contract, row, code, body) if action == 'apply' else _unlock(contract, row, body))
     elif action == 'fetch':
         sources = _requested_sources(body, {key for key, _ in _sources(row, code)})
+        metadata_options = request_options(body)
         job = contract.item_metadata_job.snapshot() or {}
         if job.get('status') == 'running':
             raise ValueError('另一项单档资料查询正在进行，请稍后重试')
-        contract.item_metadata_job.start(lambda job_id: _fetch(contract, job_id, row, code, sources),
-            restart=True, initial={'asset_id': row['id'], 'sources': sources, 'stage': '重新查询资料来源'},
-            recovery={'id': row['id'], 'sources': sources})
+        contract.item_metadata_job.start(lambda job_id: _fetch(contract, job_id, row, code, sources, **metadata_options),
+            restart=True, initial={'asset_id': row['id'], 'sources': sources, 'stage': '重新查询资料来源', **metadata_options},
+            recovery={'id': row['id'], 'sources': sources, **metadata_options})
     else:
         raise ValueError('资料操作无效')
     return q_item_metadata(contract, {'id': row['id']})

@@ -1455,7 +1455,7 @@ def _refresh_auto_batch(connection, batch):
     return decided, genres
 
 
-def _collection_candidates(candidate_root, asset_ids, candidate_rows):
+def _collection_candidates(candidate_root, asset_ids, candidate_rows, fields=None):
     """读取持久候选或当前采集快照，严格限制本轮可结算的资产。"""
     if candidate_rows is None:
         rows, _source, _skipped = read_candidates("metadata_fields", Path(candidate_root))
@@ -1464,11 +1464,31 @@ def _collection_candidates(candidate_root, asset_ids, candidate_rows):
     if asset_ids is not None:
         chosen = {str(value) for value in asset_ids}
         rows = [row for row in rows if str(row.get('asset_id') or '') in chosen]
+    if fields is not None:
+        rows = [row for row in rows if row.get('field') in fields]
     return rows
 
 
+def _prepare_auto_rows(batch, decided, genres, fill_only):
+    """在当前事务的现值上排除不适用状态、保护字段与已填字段。"""
+    eligible, skipped = [], 0
+    for row in batch:
+        item_key = str(row.get('item_key') or '').strip()
+        if not item_key or str(row.get('status') or '').strip() != 'candidate':
+            continue
+        row['candidates'] = _row_candidates(row, genres)
+        prior = decided.get(item_key)
+        if ((prior and _decision_note(prior).get('user_locked'))
+                or (fill_only and str(row.get('current_value') or '').strip())):
+            skipped += 1
+            continue
+        eligible.append((item_key, row, prior))
+    return eligible, skipped
+
+
 def auto_apply_metadata(database, candidate_root, *, batch_size=AUTO_APPLY_BATCH,
-                        active=lambda: True, snapshot_root=None, asset_ids=None, candidate_rows=None):
+                        active=lambda: True, snapshot_root=None, asset_ids=None, candidate_rows=None,
+                        fill_only=False, fields=None):
     """把确定的那部分直接落库，不占人工队列。
 
     ADR-0018：这是「刮削结果只作候选、不直接改写真相字段」的一个**窄例外**，
@@ -1492,8 +1512,9 @@ def auto_apply_metadata(database, candidate_root, *, batch_size=AUTO_APPLY_BATCH
     猜错的表现是测试悄悄读起了真实库。
     `asset_ids` 非空时只结算给定资产的候选；空集合不落库，None 表示全部候选。
     `candidate_rows` 是当前采集的字段快照；提供时不重新扫描全库 CSV。
+    `fill_only` 在同一写入事务内跳过已有值，包含标签并集；`fields` 限定可处理的字段。
     """
-    rows = _collection_candidates(candidate_root, asset_ids, candidate_rows)
+    rows = _collection_candidates(candidate_root, asset_ids, candidate_rows, fields)
     applied, skipped, rejected, refreshed = [], 0, 0, 0
     # 一次运行一个批次号，并集补进来的标签按它整批撤回。
     union_batch = f"{UNION_TAGS_SOURCE}@{time.strftime('%Y%m%dT%H%M%S')}"
@@ -1509,17 +1530,9 @@ def auto_apply_metadata(database, candidate_root, *, batch_size=AUTO_APPLY_BATCH
             # 候选落盘之后落过库、合并过实体的，快照还写着空，照它落库就是拿来源覆盖已有值。
             decided, genres = _refresh_auto_batch(connection, batch)
             now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            for row in batch:
-                item_key = str(row.get("item_key") or "").strip()
-                if not item_key:
-                    continue
-                if str(row.get("status") or "").strip() != "candidate":
-                    continue
-                row["candidates"] = _row_candidates(row, genres)
-                prior = decided.get(item_key)
-                if prior and _decision_note(prior).get('user_locked'):
-                    skipped += 1
-                    continue
+            eligible, blocked = _prepare_auto_rows(batch, decided, genres, fill_only)
+            skipped += blocked
+            for item_key, row, prior in eligible:
                 if overwrite_requires_review(connection, row):
                     skipped += 1
                     continue

@@ -142,6 +142,9 @@ if ($Standalone -and -not $ApplicationOnly) {
     --add-data "$(Join-Path $ProjectRoot 'web');web" `
     --add-data "$(Join-Path $ProjectRoot 'migrations');migrations" `
     --add-data "$(Join-Path $ProjectRoot 'resources');resources" `
+    --add-data "$(Join-Path $ProjectRoot 'tools\amane-bridge\bridge.py');tools/amane-bridge" `
+    --add-data "$(Join-Path $ProjectRoot 'tools\amane-bridge\pyproject.toml');tools/amane-bridge" `
+    --add-data "$(Join-Path $ProjectRoot 'tools\amane-bridge\uv.lock');tools/amane-bridge" `
     --add-data "${BuildInfoPath};." `
     --add-data "${SentryConfigPath};." `
     (Join-Path $ProjectRoot 'scripts\build_app_entry.py')

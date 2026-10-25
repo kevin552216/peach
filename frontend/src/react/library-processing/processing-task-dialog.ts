@@ -1,5 +1,6 @@
 import { checkboxHtml, formModal, iconSwitchHtml } from '@peach/legacy/ui';
 import type { LibraryProcessingCommand, ProcessingSpeed, ProcessingTask } from './library-processing';
+import { metadataOptionsHtml, readMetadataOptions } from './metadata-options';
 
 export const TASK_LABELS: Record<ProcessingTask, string> = {
   scan: '更新文件清单', probe: '读取媒体属性', metadata: '补齐影片资料',
@@ -37,6 +38,7 @@ export function processingTaskDialog(command: LibraryProcessingCommand, {
     title: '新任务', confirmLabel: '开始任务',
     description,
     body: `<div class="modalfield"><span>本次处理项目</span>${options}</div>`
+      + `<div data-task-metadata ${chosen.includes('metadata') ? '' : 'hidden'}>${metadataOptionsHtml(command.metadata_fields, command.fill_other_metadata)}</div>`
       + (metadataOnly ? '<p>视频预览生成已在媒体库设置中关闭。</p>' : '')
       + iconSwitchHtml('processing-execution', '执行方式', [['sequential', '依序处理'], ['parallel', '并行处理'], ['pipeline', '就绪即处理']], 'sequential', { text: true })
       + `<div data-defer-previews hidden><label class="pickrow">${checkboxHtml('name="processing-defer" checked')}`
@@ -51,12 +53,14 @@ export function processingTaskDialog(command: LibraryProcessingCommand, {
       const execution_mode = execution === 'pipeline' ? 'pipeline' : execution === 'parallel' ? 'parallel' : 'sequential';
       const speed = value('processing-speed');
       await onRun({ ...command, tasks, execution_mode,
+        ...(tasks.includes('metadata') ? readMetadataOptions(dialog.dialog) : {}),
         defer_suspected_duplicates: execution_mode !== 'sequential' && tasks.includes('previews')
           && !!dialog.dialog.querySelector<HTMLInputElement>('input[name="processing-defer"]')?.checked,
         speed_mode: speed === 'low' ? 'low' : speed === 'high' ? 'high' : 'standard' });
     },
   });
   dialog.dialog.addEventListener('change', () => {
+    dialog.dialog.querySelector<HTMLElement>('[data-task-metadata]')!.hidden = !dialog.dialog.querySelector<HTMLInputElement>('input[name="processing-task"][value="metadata"]')?.checked;
     const execution = dialog.dialog.querySelector<HTMLInputElement>('input[name="processing-execution"]:checked')?.value;
     const parallel = execution === 'parallel' || execution === 'pipeline';
     const previews = !!dialog.dialog.querySelector<HTMLInputElement>('input[name="processing-task"][value="previews"]')?.checked;

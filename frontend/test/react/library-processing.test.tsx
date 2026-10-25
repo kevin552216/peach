@@ -33,9 +33,11 @@ async function click(target: Parameters<typeof renderClick>[0]) {
     await submit(document.querySelector('dialog form'));
 }
 const defaultRequest = { tasks: ['scan', 'probe', 'metadata'], execution_mode: 'sequential',
-  defer_suspected_duplicates: false, speed_mode: 'standard' };
+  defer_suspected_duplicates: false, speed_mode: 'standard',
+  metadata_fields: ['title', 'performers', 'studio', 'release_date', 'tags'], fill_other_metadata: true };
 const taskRequest = (stage: string, tasks: string[], speed_mode = 'standard') => ({
   stage, tasks, execution_mode: 'sequential', defer_suspected_duplicates: false, speed_mode,
+  ...(tasks.includes('metadata') ? { metadata_fields: ['title', 'performers', 'studio', 'release_date', 'tags'], fill_other_metadata: true } : {}),
 });
 afterEach(() => {
   queryClient.clear();
@@ -158,6 +160,32 @@ it('扫描与补全方式共用一颗主键加一个下拉，各自交自己的�
   expect(served.posts()).toEqual([defaultRequest, taskRequest('scan', ['scan', 'probe']),
     taskRequest('collect', ['probe', 'metadata']), taskRequest('previews', ['previews'], 'low'), taskRequest('metadata', ['metadata'])]);
   expect(host.querySelector('a[href="/sources"]')?.textContent).toContain('来源和凭证');
+});
+
+it('补齐资料按所选缺失字段过滤，可取消顺带补空', async () => {
+  confirmTask = false;
+  const served = await open({ status: 'idle' }, () => ({ status: 'complete' }));
+  const host = await mount(card({ toast: vi.fn() }));
+  await click(host.querySelector('[data-split-button] [aria-haspopup="dialog"]'));
+  await click(menuItem('仅补全资料'));
+  expect(served.posts()).toEqual([]);
+  const dialog = document.querySelector('dialog[open]')!;
+  expect(dialog.querySelector<HTMLInputElement>('input[name="metadata-fill-other"]')?.checked).toBe(true);
+  for (const field of ['title', 'release_date', 'tags']) {
+    await click(dialog.querySelector(`input[name="metadata-field"][value="${field}"]`));
+  }
+  await click(dialog.querySelector('input[name="metadata-fill-other"]'));
+  await click(buttonNamed('开始任务', dialog));
+  expect(served.posts()).toEqual([{ ...taskRequest('metadata', ['metadata']), metadata_fields: ['performers', 'studio'], fill_other_metadata: false }]);
+});
+
+it('资料筛选显示检查、已齐全跳过与待补数量', async () => {
+  await open({ status: 'running', metadata_inspected: 19082, metadata_skipped_complete: 1972, metadata_eligible: 17110 });
+  const host = await mount(card({ toast: vi.fn() }));
+  const summary = host.querySelector('[data-metadata-selection-summary]');
+  expect(summary?.textContent).toContain('检查 19082 部');
+  expect(summary?.textContent).toContain('跳过 1972 部');
+  expect(summary?.textContent).toContain('待补 17110 部');
 });
 
 it('启动只提交一次，进度用 GET 读回来，完成后给出回执与复核入口', async () => {

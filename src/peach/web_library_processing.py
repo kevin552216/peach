@@ -210,6 +210,8 @@ def w_library_processing(contract, body, *, resume=False):
     if previous.get('status') in ACTIVE and not resume:
         return previous
     retry_ids, asset_ids, stage = _processing_request(contract, config, previous, body)
+    from .metadata_selection import request_options
+    metadata_options = request_options(body or {}, previous if resume or retry_ids is not None else None)
     if retry_ids is not None and not retry_ids:
         return previous
     mode = valid_mode(control_for(config).mode if resume else
@@ -229,6 +231,7 @@ def w_library_processing(contract, body, *, resume=False):
                 resume_state=previous if resume else None,
                 speed_mode=control_for(config).mode,
                 **selected_options,
+                **metadata_options,
                 active=lambda: (contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
                 report=lambda state: contract.library_processing_job.update(job_id, **{
                     key: value for key, value in state.items() if key != 'job_id'}))
@@ -242,10 +245,11 @@ def w_library_processing(contract, body, *, resume=False):
               PROBE_STAGE: '准备读取媒体属性', COVERS_STAGE: '准备补全封面'}
     return contract.library_processing_job.start(
         work, restart=True, initial={'stage': labels[stage], 'requested_stage': stage,
+                                    **metadata_options,
                                     **_selection_state(selection),
                                     **initial_estimate(config, contract.db_path, stage, asset_ids or retry_ids, mode,
                                                        tasks=selected_options.get('tasks'))},
-        recovery={'stage': stage, 'speed_mode': mode, **selected_options, **({'asset_ids': asset_ids or retry_ids}
+        recovery={'stage': stage, 'speed_mode': mode, **selected_options, **metadata_options, **({'asset_ids': asset_ids or retry_ids}
                                     if asset_ids is not None or retry_ids is not None else {})})
 
 

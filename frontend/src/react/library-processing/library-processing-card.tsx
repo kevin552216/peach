@@ -32,6 +32,7 @@ import { ProcessingControls } from './processing-controls';
 import { ProcessingProgress, WorkProgress } from './processing-line';
 import { downloadIssueList, exportProcessingIssues } from './issue-export';
 import { busyProps, useAction } from '../settings/use-action';
+import { metadataFieldLabels } from './metadata-options';
 
 /* 中文正文写成常量：JSX 里换行的文字会在接缝处多出一个空格，中文句子里看得见。
    卡片正文与首屏骨架共用 `SCAN_CARD_TEXT`（`management.ts`）。 */
@@ -201,6 +202,11 @@ export function LibraryProcessingCard(props: LibraryProcessingProps) {
         <div className="flex flex-col gap-2">
           <FieldsetTitle>扫描与采集</FieldsetTitle>
           <p className="text-body-2-regular text-text-secondary">{SCAN_CARD_TEXT}</p>
+          {state.metadata_inspected !== undefined ? <p className="text-body-2-regular text-text-secondary tabular-nums" data-metadata-selection-summary="">
+            {state.metadata_fields?.length ? `筛选缺失资料：${metadataFieldLabels(state.metadata_fields)}。` : ''}
+            {state.fill_other_metadata === false ? '补齐所选字段。' : '顺带补齐其它空字段。'}
+            检查 {state.metadata_inspected} 部；所选资料已齐全，跳过 {state.metadata_skipped_complete || 0} 部；待补 {state.metadata_eligible || 0} 部。
+          </p> : null}
           {state.status === 'paused' && !state.total
             ? <p className="text-caption-1-regular text-text-secondary">已暂停</p>
             : processingActive(state)

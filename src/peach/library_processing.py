@@ -37,6 +37,7 @@ from .ffmpeg import FFmpegResolver
 from .media_probe import probe_unmeasured
 from .media_sources import cost_for
 from .media_processing_policy import metadata_only
+from .metadata_selection import DEFAULT_FIELDS, MetadataSelection
 from .strm import skip_background_read
 from .record_rehome import reattach_in
 from .processing_control import deadline_after
@@ -232,7 +233,7 @@ STATE_FLUSH_SECONDS = 0.5
 CANDIDATE_FLUSH_SECONDS = 5.0
 
 #: 采集要补的字段，以及它们在 `asset` 表里的列名（没列出的与字段同名或不在表里）。
-COLLECTED_FIELDS = ('title', 'performers', 'studio', 'release_date', 'tags')
+COLLECTED_FIELDS = DEFAULT_FIELDS
 COLUMN_OF = {'title': 'catalog_title'}
 
 #: 一趟任务向外部来源要的总量。三条闸门里谁先到谁生效，之后每部片只记「本趟…已用完」。
@@ -991,8 +992,13 @@ def _candidate_review_mode(groups, row, field, source, value, local_fields, veri
     return 'review' if verify_existing and baseline and (not local or current) else 'fill'
 
 
+def _selected_fields(document, genre_decisions, only_fields):
+    fields = _fields(document, genre_decisions)
+    return fields if only_fields is None else {key: value for key, value in fields.items() if key in only_fields}
+
+
 def _merge_candidates(groups, row, code, source, document, evidence_path, genre_decisions, local_fields=(),
-                      *, verify_existing=False):
+                      *, verify_existing=False, only_fields=None):
     """把 `document` 里认得出的字段并进 `groups`：同来源的旧候选换掉，别的来源保留。
 
     NFO 核查保留不同来源的取值；已有值的差异标记为覆盖复核。相同取值不重复生成候选。
@@ -1000,7 +1006,7 @@ def _merge_candidates(groups, row, code, source, document, evidence_path, genre_
     local = source == 'local_nfo'
     spec = SOURCE_SPECS.get(source)
     official = bool(spec and spec.official)
-    for field, value in _fields(document, genre_decisions).items():
+    for field, value in _selected_fields(document, genre_decisions, only_fields).items():
         key = f"asset:{row['id']}:{field}"
         if not local and field == 'performers' and field in local_fields:
             _merge_local_performer_profiles(groups, key, value, source)
@@ -1604,7 +1610,8 @@ class _RemoteSession:
         return 0
 
 
-def _apply_finished_candidates(database, candidate_root, active, asset_ids=None, candidate_rows=None):
+def _apply_finished_candidates(database, candidate_root, active, asset_ids=None, candidate_rows=None,
+                               **selection_options):
     """候选落盘后立即执行窄规则自动落库；没有账本实例时只采集候选。
 
     停止后一条都不再写：任务已经不属于这次运行，用户按下停止之后账本还在变，
@@ -1618,7 +1625,7 @@ def _apply_finished_candidates(database, candidate_root, active, asset_ids=None,
     # 一份定义，这里传它而不是再拼一次：两处各拼一份，改 Peach 数据目录时会有一处留在原地。
     return auto_apply_metadata(database, Path(candidate_root), active=active,
                                snapshot_root=DEFAULT_METADATA_ROOT, asset_ids=asset_ids,
-                               candidate_rows=candidate_rows)
+                               candidate_rows=candidate_rows, **selection_options)
 
 
 def _enrich_finished_performers(database, groups, config, candidate_root, remote, active,
@@ -1873,11 +1880,14 @@ def _candidate_scope(groups, asset_ids):
 
 
 def _finish_collection(config, database, candidate_root, cover_root, groups, remote, *,
-                       asset_ids, active, update, issue, watermark, covered):
+                       asset_ids, active, update, issue, watermark, covered, metadata_selection=None):
     """结算本趟候选并补人物资料，全库任务同时推进存量后继。"""
-    auto_apply = _apply_finished_candidates(database, candidate_root, active, asset_ids)
+    selection = metadata_selection or MetadataSelection()
+    selected = selection.groups(_candidate_scope(groups, asset_ids))
+    auto_apply = _apply_finished_candidates(database, candidate_root, active, asset_ids,
+                                            **selection.finish_options(selected))
     profiles = _enrich_finished_performers(
-        database, _candidate_scope(groups, asset_ids), config, candidate_root, remote, active, update, issue)
+        database, selected, config, candidate_root, remote, active, update, issue)
     followups = [] if asset_ids is not None else sample_followup.plan(database, config, cover_root)
     followups += _entity_followups(database, config, watermark, covered, include_stock=asset_ids is None)
     return dict(followups=followups, auto_applied=auto_apply['applied'],
@@ -2262,11 +2272,12 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                     retry_ids=None, active=lambda: True, stage=ALL_STAGES,
                     database=None, route_overrides=None, state_file=None, asset_ids=None,
                     resume_state=None, speed_mode=None, tasks=None, execution_mode='sequential',
-                    defer_suspected_duplicates=False):
+                    defer_suspected_duplicates=False, metadata_fields=None, fill_other_metadata=True):
     """按本次工作表补缺失结果；阶段入口转换为同一份任务选择。"""
     from .library_processing_tasks import selection_for, process_selected
     selection = selection_for(config, stage, tasks, asset_ids, execution_mode, defer_suspected_duplicates)
     return process_selected(config, db_path, candidate_root, cover_root, selection=selection,
         location=location, report=report, provider_factory=provider_factory, job_id=job_id,
         retry_ids=retry_ids, active=active, stage=stage, database=database, route_overrides=route_overrides,
-        state_file=state_file, asset_ids=asset_ids, resume_state=resume_state, speed_mode=speed_mode)
+        state_file=state_file, asset_ids=asset_ids, resume_state=resume_state, speed_mode=speed_mode,
+        metadata_fields=metadata_fields, fill_other_metadata=fill_other_metadata)

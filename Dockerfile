@@ -11,6 +11,7 @@ COPY src ./src
 COPY migrations ./migrations
 COPY web ./web
 COPY resources ./resources
+COPY tools/amane-bridge/bridge.py tools/amane-bridge/pyproject.toml tools/amane-bridge/uv.lock ./tools/amane-bridge/
 RUN uv sync --locked --no-dev --no-editable
 
 FROM python:3.14.8-slim-trixie

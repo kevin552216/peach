@@ -28,6 +28,11 @@ export interface LibraryProcessingData {
   execution_mode?: 'sequential' | 'parallel' | 'pipeline';
   defer_suspected_duplicates?: boolean;
   work_progress?: Partial<Record<ProcessingTask, { status: string; done: number; total: number; failed: number; deferred: number }>>;
+  metadata_fields?: string[];
+  fill_other_metadata?: boolean;
+  metadata_inspected?: number;
+  metadata_skipped_complete?: number;
+  metadata_eligible?: number;
   metadata_only?: boolean;
   /** `idle` | `running` | `pausing` | `paused` | `stopping` | `cancelled` | `complete` | `failed`。 */
   status: string;
@@ -83,6 +88,8 @@ export interface LibraryProcessingCommand {
   tasks?: ProcessingTask[];
   execution_mode?: 'sequential' | 'parallel' | 'pipeline';
   defer_suspected_duplicates?: boolean;
+  metadata_fields?: string[];
+  fill_other_metadata?: boolean;
   asset_ids?: number[];
   job_id?: string;
   retry?: number[];

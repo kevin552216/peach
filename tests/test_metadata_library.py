@@ -86,6 +86,68 @@ def _archive_pages(url):
 
 
 class LibraryNfoTests(unittest.TestCase):
+    def _selected_metadata_case(self, fill_other, **options):
+        options.setdefault('tasks', ['metadata'])
+        media = self.root / 'media'
+        media.mkdir()
+        db = fresh_ledger(self.root)
+        with closing(sqlite3.connect(db)) as connection, connection:
+            for asset_id, code in ((1, 'ABW-358'), (2, 'ABW-359')):
+                video = media / (code + '.mp4')
+                video.write_bytes(b'video')
+                connection.execute("INSERT INTO asset(id,path,name,location,medium,code,catalog_title,studio) "
+                    "VALUES(?,?,?,'local','video',?,?,?)",
+                    (asset_id, str(video), video.name, code, '原有标题' if asset_id == 1 else None,
+                     None if asset_id == 1 else '原有厂牌'))
+            actor = connection.execute("INSERT INTO entity(kind,canonical_name,normalized_name,created_at,updated_at) "
+                "VALUES('performer','已有演员','held','2026-01-01','2026-01-01')").lastrowid
+            connection.execute("INSERT INTO asset_entity(asset_id,entity_id,role,source,confidence) "
+                               "VALUES(2,?,'performer','user',1)", (actor,))
+        (media / 'ABW-359.nfo').write_text('<movie><title>不应导入的标题</title></movie>', encoding='utf-8')
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True,
+                             locations={'local': (str(media),)})
+        database = LedgerDatabase(db)
+        provider = stub_provider()
+        provider.query.return_value = {'id': 'ABW-358', 'title': '来源标题', 'maker': 'Prestige',
+            'release_date': '2023-05-26', 'actresses': [{'japanese_name': '涼森れむ'}]}
+        with patch('peach.library_processing._enrich_finished_performers',
+                   return_value={'aliases': 0, 'avatars': 0, 'conflicts': 0, 'failed': 0}):
+            result = process_library(config, db, self.root / 'generated', self.root / 'covers',
+                stage='metadata', database=database, provider_factory=lambda: provider,
+                route_overrides='censored=r18dev,javdb', metadata_fields=['performers', 'studio'],
+                fill_other_metadata=fill_other, **options)
+        self.assertEqual(result['metadata_inspected'], 2)
+        self.assertEqual(result['metadata_skipped_complete'], 1)
+        self.assertEqual(result['metadata_eligible'], 1)
+        self.assertEqual([call.args[0] for call in provider.query.call_args_list], ['ABW-358'])
+        provider.cover.assert_not_called()
+        provider.community.assert_not_called()
+        with database.read_connection() as connection:
+            first = connection.execute('SELECT catalog_title,studio,release_date FROM asset WHERE id=1').fetchone()
+            second = connection.execute('SELECT catalog_title,studio,release_date FROM asset WHERE id=2').fetchone()
+            self.assertEqual(first['catalog_title'], '原有标题')
+            self.assertEqual(first['studio'], 'Prestige')
+            self.assertEqual(first['release_date'], '2023-05-26' if fill_other else None)
+            self.assertEqual(tuple(second), (None, '原有厂牌', None))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM asset_entity "
+                "WHERE asset_id=1 AND role='performer'").fetchone()[0], 1)
+
+    @windows_ledger_roots
+    def test_selected_missing_fields_filter_files_and_allow_other_empty_fields_to_be_filled(self):
+        self._selected_metadata_case(True)
+
+    @windows_ledger_roots
+    def test_selected_missing_fields_can_exclude_other_empty_fields(self):
+        self._selected_metadata_case(False)
+
+    @windows_ledger_roots
+    def test_parallel_metadata_work_applies_the_missing_field_filter(self):
+        self._selected_metadata_case(True, execution_mode='parallel')
+
+    @windows_ledger_roots
+    def test_ready_metadata_work_applies_the_missing_field_filter(self):
+        self._selected_metadata_case(False, tasks=['metadata'], execution_mode='pipeline')
+
     def test_task_sidecar_index_does_not_walk_the_folder_for_each_video(self):
         from peach.library_nfo import SidecarIndex
         class CountedFiles(dict):

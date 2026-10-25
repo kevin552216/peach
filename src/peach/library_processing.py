@@ -1096,16 +1096,23 @@ def _sources_for(code, *evidence, route_overrides=None):
     return metadata_routes.stages_for_code(code, *evidence, overrides=route_overrides)
 
 
+def _usable_fc2_cast(payload):
+    """FC2 快照里有完整可解析的出演者名单。未解称呼留待其他来源补证。"""
+    from .metadata_auto_apply import _stage_names
+    return _stage_names(extract_peach_fields(payload).get('performers') or {})[0] is not None
+
+
 def _lacks_performers(required, payloads):
-    """这一行要演员，而手上这几份快照一个人也没给。"""
-    return 'performers' in required and not any(
-        extract_peach_fields(payload).get('performers') for payload in payloads)
+    """这一行要演员，而手上的 FC2 快照没有完整可解析的名单。"""
+    return 'performers' in required and not any(_usable_fc2_cast(payload) for payload in payloads)
 
 
 def _given_fields(entries):
     """这些证据条目一共给出了哪几个非空 Peach 字段。链上何时停手按它判。"""
-    return {field for _, payload, _ in entries
-            for field, value in extract_peach_fields(payload).items() if value}
+    return {field for source, payload, _ in entries
+            for field, value in extract_peach_fields(payload).items() if value
+            and (field != 'performers' or source not in metadata_routes.FC2_CAST_SITES
+                 or _usable_fc2_cast(payload))}
 
 
 def _asks_cover(code, *evidence):

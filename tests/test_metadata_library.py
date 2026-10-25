@@ -1275,6 +1275,18 @@ class LibraryNfoTests(unittest.TestCase):
                 self.assertEqual([source for source, _ in found], sources)
                 self.assertFalse([url for url in asked if 'fc2cmadb.com' not in url], '官方页与 JavArchive 都不再问')
 
+    def test_unresolved_cached_cast_keeps_the_mirror_in_the_chain(self):
+        for names, expected in ((['梨奈', '巨乳保育士'], ['fc2cmadb']),
+                                (['巨乳保育士'], ['fc2cmadb']), (['梨奈'], [])):
+            asked = []
+            provider, pages = self._live_fc2_provider(asked)
+            known = [{'id': 'FC2-PPV-3232110',
+                      'actresses': [{'japanese_name': name} for name in names]}]
+            with self.subTest(names=names), patch('peach.jav_cover_fetch._fetch', side_effect=pages):
+                found = provider.fc2('FC2-PPV-3232110', required=('performers',),
+                                     route=('fc2cmadb',), known=known)
+                self.assertEqual([source for source, _ in found], expected)
+
     def test_the_cover_step_asks_the_rest_of_the_chain_for_more_image_sources(self):
         """答上的那一档给的地址下不下得来图，这一层判不出来，所以图源要凑齐再挑。"""
         asked = []
@@ -1977,6 +1989,33 @@ class LibraryNfoTests(unittest.TestCase):
                 for row in read_rows(self.root / 'generated/library-metadata-field-candidates.csv')}
         self.assertEqual([(entry['source'], entry['display_value']) for entry in rows['performers']],
                          [('fc2cmadb', '梨奈')])
+
+    @windows_ledger_roots
+    def test_mixed_cast_snapshot_leaves_performers_missing_for_the_mirror(self):
+        media = self.root / 'media'
+        media.mkdir()
+        (media / 'FC2-PPV-2851534.mp4').write_bytes(b'video')
+        db = fresh_ledger(self.root)
+        config = PeachConfig(self.root, self.root / 'config.toml', present=True,
+                             locations={'local': (str(media),)})
+        product = {'id': 'FC2-PPV-2851534', 'title': '测试作品', 'maker': 'FC2-PPV',
+                   'release_date': '2022-04-28',
+                   'actresses': [{'japanese_name': name} for name in ('梨奈', '巨乳保育士')]}
+        path = config.directory('sources') / 'library-metadata' / 'FC2-PPV-2851534-fc2ppvdb.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(product, ensure_ascii=False), encoding='utf-8')
+        provider = stub_provider()
+        provider.fc2.return_value = [('fc2cmadb', {'id': 'FC2-PPV-2851534',
+            'actresses': [{'japanese_name': '梨奈'}],
+            'source_url': 'https://fc2cmadb.com/articles/2851534'})]
+        provider.cover.return_value = False
+        process_library(config, db, self.root / 'generated', self.root / 'covers',
+                        provider_factory=Mock(return_value=provider), database=LedgerDatabase(db))
+        provider.fc2.assert_called_once()
+        self.assertIn('performers', provider.fc2.call_args.kwargs['required'])
+        with closing(sqlite3.connect(db)) as connection:
+            self.assertEqual(connection.execute("SELECT e.canonical_name FROM asset_entity ae "
+                "JOIN entity e ON e.id=ae.entity_id WHERE ae.role='performer'").fetchall(), [('梨奈',)])
 
     @windows_ledger_roots
     def test_a_pending_candidate_skips_only_the_source_that_gave_it(self):

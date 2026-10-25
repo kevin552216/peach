@@ -24,6 +24,11 @@ export interface LibraryProcessingIssue {
 
 /** 一趟扫描与采集的快照。字段以 `q_library_processing`（`src/peach/web_library_processing.py`）为准。 */
 export interface LibraryProcessingData {
+  metadata_fields?: string[];
+  fill_other_metadata?: boolean;
+  metadata_inspected?: number;
+  metadata_skipped_complete?: number;
+  metadata_eligible?: number;
   metadata_only?: boolean;
   /** `idle` | `running` | `pausing` | `paused` | `complete` | `failed`。 */
   status: string;
@@ -73,6 +78,8 @@ export interface LibraryProcessingData {
 /** 一次写操作的请求体：指定处理阶段与影片，或者按任务号重试失败项。 */
 export type ProcessingSpeed = 'low' | 'standard' | 'high';
 export interface LibraryProcessingCommand {
+  metadata_fields?: string[];
+  fill_other_metadata?: boolean;
   stage?: 'scan' | 'collect' | 'previews' | 'metadata';
   asset_ids?: number[];
   job_id?: string;

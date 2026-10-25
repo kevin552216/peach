@@ -1359,6 +1359,23 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(note["refreshed_candidate_key"], "ABW-502:tags:1")
         self.assertEqual(self._auto()["applied"], 0)
 
+    def test_fill_only_keeps_live_tags_even_when_a_cached_candidate_can_extend_them(self):
+        self._asset(552, 'ABW-552', 'ABW-552.mp4')
+        self._seed_tags(552, ['美乳', '肛交'])
+        self._stale_approvals({'ABW-552:tags': {
+            'candidate_key': 'ABW-552:tags:0', 'source': 'r18dev', 'user_note': '用户确认'}})
+        self.write_metadata_rows([{'item_key': 'ABW-552:tags', 'code': 'ABW-552',
+            'field': 'tags', 'current': '', 'candidates': [
+                {'value': ['美乳', '肛交'], 'display': '美乳、肛交'},
+                {'source': 'javdb', 'value': ['美乳', '高跟'], 'display': '美乳、高跟'}]}])
+        before = self._full_decision('ABW-552:tags')
+        result = auto_apply_metadata(self.contract.database, self.candidates, fill_only=True)
+        self.assertEqual(result['applied'], 0)
+        self.assertEqual(self._tags_of(552)[1], {'美乳', '肛交'})
+        self.assertEqual(self._full_decision('ABW-552:tags'), before)
+        self.assertEqual(self._auto()['applied'], 1)
+        self.assertEqual(self._tags_of(552)[1], {'美乳', '肛交', '高跟'})
+
     def test_javdb_cannot_replace_uncensored_amateur_or_fc2_tags(self):
         rows = []
         for aid, code in ((503, "040221-001"), (504, "259LUXU-1475"), (505, "FC2-PPV-1234567")):

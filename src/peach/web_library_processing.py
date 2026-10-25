@@ -177,6 +177,8 @@ def w_library_processing(contract, body, *, resume=False):
     if previous.get('status') in ACTIVE and not resume:
         return previous
     retry_ids, asset_ids, stage = _processing_request(contract, config, previous, body)
+    from .metadata_selection import request_options
+    metadata_options = request_options(body or {}, previous if resume or retry_ids is not None else None)
     if retry_ids is not None and not retry_ids:
         return previous
     mode = valid_mode(control_for(config).mode if resume else
@@ -191,6 +193,7 @@ def w_library_processing(contract, body, *, resume=False):
                 database=contract.database,
                 resume_state=previous if resume else None,
                 speed_mode=control_for(config).mode,
+                **metadata_options,
                 active=lambda: (contract.library_processing_job.snapshot() or {}).get('job_id') == job_id,
                 report=lambda state: contract.library_processing_job.update(job_id, **{
                     key: value for key, value in state.items() if key != 'job_id'}))
@@ -203,6 +206,7 @@ def w_library_processing(contract, body, *, resume=False):
               METADATA_STAGE: '准备采集资料', PREVIEWS_STAGE: '准备生成预览图'}
     return contract.library_processing_job.start(
         work, restart=True, initial={'stage': labels[stage], 'requested_stage': stage,
+                                    **metadata_options,
                                     **initial_estimate(config, contract.db_path, stage, asset_ids or retry_ids, mode)},
-        recovery={'stage': stage, 'speed_mode': mode, **({'asset_ids': asset_ids or retry_ids}
+        recovery={'stage': stage, 'speed_mode': mode, **metadata_options, **({'asset_ids': asset_ids or retry_ids}
                                     if asset_ids is not None or retry_ids is not None else {})})

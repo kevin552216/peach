@@ -75,6 +75,15 @@ class ItemMetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             metadata.w_item_metadata(self.contract, {'id': 1, 'source': 'dmm'})
 
+    def test_native_selected_source_session_does_not_request_covers(self):
+        row, code = metadata._asset(self.contract, 1)
+        remote = metadata._SelectedSource(self.config, 'fc2cmadb')
+        with patch.object(remote, '_metadata', return_value=[]) as query, patch.object(remote, '_cover') as cover:
+            remote.collect(row, code, ['performers'], self.root / 'covers', include_covers=False,
+                           update=lambda **_state: None, issue=lambda *_args, **_options: None)
+        query.assert_called_once()
+        cover.assert_not_called()
+
     def test_completion_during_read_does_not_stop_polling_with_old_candidates(self):
         completed = self.prepare()
         self.contract.item_metadata_job.state = {'job_id': 'fetch', 'status': 'running', 'asset_id': 1}
@@ -103,6 +112,18 @@ class ItemMetadataTests(unittest.TestCase):
         for sources in ('fc2cmadb', ['fc2cmadb', 'fc2cmadb'], ['dmm'], [True], [{}]):
             with self.subTest(sources=sources), self.assertRaises(ValueError):
                 metadata._requested_sources({'sources': sources}, available)
+
+    def test_metadata_options_preserve_conditions_and_reject_empty_or_ambiguous_scope(self):
+        self.assertEqual(metadata.request_options({}), {})
+        expected = {'metadata_fields': ['performers', 'studio'], 'fill_other_metadata': False}
+        self.assertEqual(metadata.request_options({}, expected), expected)
+        default = metadata.request_options({'fill_other_metadata': False})
+        self.assertEqual(default['metadata_fields'], list(metadata.engine.COLLECTED_FIELDS))
+        self.assertFalse(default['fill_other_metadata'])
+        for body in ({'metadata_fields': None}, {'metadata_fields': []}, {'metadata_fields': ['unknown']},
+                     {'metadata_fields': ['performers', 'performers']}, {'fill_other_metadata': 'false'}):
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                metadata.request_options(body)
 
     def test_all_selected_sources_are_queried_and_candidates_keep_their_source(self):
         row, code = metadata._asset(self.contract, 1)

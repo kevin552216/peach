@@ -8,6 +8,7 @@ import { formModal, iconSwitchHtml } from '@peach/legacy/ui';
 import { MenuDialog } from '../components/menu-dialog';
 import { busyProps } from '../settings/use-action';
 import type { LibraryProcessingCommand, ProcessingSpeed } from './library-processing';
+import { metadataOptionsHtml, readMetadataOptions } from './metadata-options';
 
 export const RESOURCE_NOTICE_KEY = 'peach.library-processing.resource-notice.v1';
 
@@ -31,9 +32,20 @@ export function ProcessingActions({ busy, scan = false, metadataOnly = false, sp
   const run = (command: LibraryProcessingCommand) => {
     if (busy) return;
     setOpen(false);
+    if (command.stage === 'metadata') {
+      if (prompt.current) return;
+      const dialog = formModal({ title: '补齐影片资料', confirmLabel: '开始任务',
+        description: '选择本次在意的缺失资料，已有内容保留。',
+        body: metadataOptionsHtml(command.metadata_fields, command.fill_other_metadata),
+        onConfirm: async () => { await onRun({ ...command, ...readMetadataOptions(dialog.dialog) }) },
+      });
+      prompt.current = dialog;
+      void dialog.done.then(() => { if (prompt.current === dialog) prompt.current = null });
+      return;
+    }
     let acknowledged = false;
     try { acknowledged = localStorage.getItem(RESOURCE_NOTICE_KEY) === 'seen' } catch { /* 存储不可用时保留提示 */ }
-    if (!scan || acknowledged || command.stage === 'metadata') {
+    if (!scan || acknowledged) {
       void Promise.resolve(onRun(command)).catch(() => { /* 错误由任务入口留在原位 */ });
       return;
     }

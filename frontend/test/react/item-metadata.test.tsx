@@ -47,7 +47,8 @@ it('打开详情不联网取证，可勾选多家来源并从候选中逐字段�
   await settle();
   await click(buttonNamed('查询最新资料', host));
   const fetchBody = JSON.parse(String(fetcher.mock.calls.find(([, options]) => options?.method === 'POST')?.[1]?.body));
-  expect(fetchBody).toMatchObject({ id: 1, action: 'fetch', sources: ['fc2cmadb', 'fc2ppvdb'] });
+  expect(fetchBody).toMatchObject({ id: 1, action: 'fetch', sources: ['fc2cmadb', 'fc2ppvdb'],
+    metadata_fields: ['title', 'performers', 'studio', 'release_date', 'tags'], fill_other_metadata: true });
   expect(host.textContent).toContain('所选的 2 家来源');
   await click(host.querySelector('#metadata-1-performers [data-select-trigger]'));
   await click(host.querySelector('#metadata-1-performers [data-select-option="cast"]'));
@@ -62,7 +63,8 @@ it('打开详情不联网取证，可勾选多家来源并从候选中逐字段�
 });
 
 it('未指定来源使用自动顺序，勾选可取消并回到自动顺序', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => state })));
+  const fetcher = vi.fn(async (_url: string, _options?: RequestInit) => ({ ok: true, json: async () => state }));
+  vi.stubGlobal('fetch', fetcher);
   const host = await mount(<QueryClientProvider client={queryClient}><ItemMetadata id={1} onReceipt={vi.fn()} /></QueryClientProvider>);
   await click(buttonNamed('重新抓取资料', host));
   await settle();
@@ -71,7 +73,14 @@ it('未指定来源使用自动顺序，勾选可取消并回到自动顺序', a
   expect(host.textContent).toContain('所选的 1 家来源');
   await click(buttonNamed('使用默认来源顺序', host));
   expect(host.textContent).toContain('未指定来源时按默认顺序查询');
-  expect([...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every(input => !input.checked)).toBe(true);
+  expect([...host.querySelector('fieldset')!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every(input => !input.checked)).toBe(true);
+  for (const name of ['标题', '发行日期', '标签', '顺便取得其他资料候选']) {
+    await click([...host.querySelectorAll('label')].find(label => label.textContent?.trim() === name));
+  }
+  await click(buttonNamed('查询最新资料', host));
+  expect(JSON.parse(String(fetcher.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+    metadata_fields: ['performers', 'studio'], fill_other_metadata: false,
+  });
 });
 
 it('网站限流原因保留在原位置，重新打开时能读取已保护字段', async () => {

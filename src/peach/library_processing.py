@@ -40,6 +40,7 @@ from .jobs import DiskGuard
 from .media_probe import probe_unmeasured
 from .media_sources import cost_for
 from .media_processing_policy import metadata_only
+from .metadata_selection import DEFAULT_FIELDS, MetadataSelection
 from .strm import skip_background_read
 from .record_rehome import reattach_in
 from .processing_control import (task_control, bind_control, checkpoint_values,
@@ -236,7 +237,7 @@ STATE_FLUSH_SECONDS = 0.5
 CANDIDATE_FLUSH_SECONDS = 5.0
 
 #: 采集要补的字段，以及它们在 `asset` 表里的列名（没列出的与字段同名或不在表里）。
-COLLECTED_FIELDS = ('title', 'performers', 'studio', 'release_date', 'tags')
+COLLECTED_FIELDS = DEFAULT_FIELDS
 COLUMN_OF = {'title': 'catalog_title'}
 
 #: 一趟任务向外部来源要的总量。三条闸门里谁先到谁生效，之后每部片只记「本趟…已用完」。
@@ -991,8 +992,13 @@ def _candidate_review_mode(groups, row, field, source, value, local_fields, veri
     return 'review' if verify_existing and baseline and (not local or current) else 'fill'
 
 
+def _selected_fields(document, genre_decisions, only_fields):
+    fields = _fields(document, genre_decisions)
+    return fields if only_fields is None else {key: value for key, value in fields.items() if key in only_fields}
+
+
 def _merge_candidates(groups, row, code, source, document, evidence_path, genre_decisions, local_fields=(),
-                      *, verify_existing=False):
+                      *, verify_existing=False, only_fields=None):
     """把 `document` 里认得出的字段并进 `groups`：同来源的旧候选换掉，别的来源保留。
 
     NFO 核查保留不同来源的取值；已有值的差异标记为覆盖复核。相同取值不重复生成候选。
@@ -1000,7 +1006,7 @@ def _merge_candidates(groups, row, code, source, document, evidence_path, genre_
     local = source == 'local_nfo'
     spec = SOURCE_SPECS.get(source)
     official = bool(spec and spec.official)
-    for field, value in _fields(document, genre_decisions).items():
+    for field, value in _selected_fields(document, genre_decisions, only_fields).items():
         key = f"asset:{row['id']}:{field}"
         if not local and field == 'performers' and field in local_fields:
             _merge_local_performer_profiles(groups, key, value, source)
@@ -1312,7 +1318,8 @@ class _RemoteSession:
         if self._provider is not None and hasattr(self._provider, 'close'):
             self._provider.close()
 
-    def collect(self, row, code, missing, cover_root, *, update, issue, answered=(), received=lambda entries: None):
+    def collect(self, row, code, missing, cover_root, *, update, issue, answered=(), received=lambda entries: None,
+                include_covers=True):
         """给这一行补外部资料与封面；返回 (证据条目, 新落盘的封面数)。
 
         文件名被读成番号的创作者作品一家都不问，判据见 `catalog_rules.scrapes_as_jav`；
@@ -1329,7 +1336,7 @@ class _RemoteSession:
                                   or not set(answered).intersection(chain)):
             entries = self._metadata(row, code, missing, update=update, issue=issue, answered=answered,
                                      received=received)
-        if _asks_cover(code, *_studio_evidence(row)) and not cover_settled(cover_root / (code + '.jpg')):
+        if include_covers and _asks_cover(code, *_studio_evidence(row)) and not cover_settled(cover_root / (code + '.jpg')):
             snapshots, absent = self._cover_inputs(code, chain, entries)
             covers = self._cover(row, code, cover_root, update=update, issue=issue,
                                  snapshots=snapshots, absent=absent)
@@ -1580,7 +1587,8 @@ class _RemoteSession:
         return 0
 
 
-def _apply_finished_candidates(database, candidate_root, active, asset_ids=None, candidate_rows=None):
+def _apply_finished_candidates(database, candidate_root, active, asset_ids=None, candidate_rows=None,
+                               **selection_options):
     """候选落盘后立即执行窄规则自动落库；没有账本实例时只采集候选。
 
     停止后一条都不再写：任务已经不属于这次运行，用户按下停止之后账本还在变，
@@ -1594,7 +1602,7 @@ def _apply_finished_candidates(database, candidate_root, active, asset_ids=None,
     # 一份定义，这里传它而不是再拼一次：两处各拼一份，改 Peach 数据目录时会有一处留在原地。
     return auto_apply_metadata(database, Path(candidate_root), active=active,
                                snapshot_root=DEFAULT_METADATA_ROOT, asset_ids=asset_ids,
-                               candidate_rows=candidate_rows)
+                               candidate_rows=candidate_rows, **selection_options)
 
 
 def _enrich_finished_performers(database, groups, config, candidate_root, remote, active,
@@ -1849,11 +1857,14 @@ def _candidate_scope(groups, asset_ids):
 
 
 def _finish_collection(config, database, candidate_root, cover_root, groups, remote, *,
-                       asset_ids, active, update, issue, watermark, covered):
+                       asset_ids, active, update, issue, watermark, covered, metadata_selection=None):
     """结算本趟候选并补人物资料，全库任务同时推进存量后继。"""
-    auto_apply = _apply_finished_candidates(database, candidate_root, active, asset_ids)
+    selection = metadata_selection or MetadataSelection()
+    selected = selection.groups(_candidate_scope(groups, asset_ids))
+    auto_apply = _apply_finished_candidates(database, candidate_root, active, asset_ids,
+                                            **selection.finish_options(selected))
     profiles = _enrich_finished_performers(
-        database, _candidate_scope(groups, asset_ids), config, candidate_root, remote, active, update, issue)
+        database, selected, config, candidate_root, remote, active, update, issue)
     followups = [] if asset_ids is not None else sample_followup.plan(database, config, cover_root)
     followups += _entity_followups(database, config, watermark, covered, include_stock=asset_ids is None)
     return dict(followups=followups, auto_applied=auto_apply['applied'],
@@ -2206,7 +2217,7 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                     report=lambda state: None, provider_factory=None, job_id=None,
                     retry_ids=None, active=lambda: True, stage=ALL_STAGES,
                     database=None, route_overrides=None, state_file=None, asset_ids=None,
-                    resume_state=None, speed_mode=None):
+                    resume_state=None, speed_mode=None, metadata_fields=None, fill_other_metadata=True):
     """登记文件与确定的番号，外部资料保留为可复核候选。
 
     `retry_ids` 为 `None` 时处理整个馆藏；给定时只处理这些项目（上一任务记录的
@@ -2224,6 +2235,7 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
     `state_file` 给后台定向任务保存独立进度，共享候选写入仍使用全库处理锁。
     """
     selected_ids = _validate_processing_request(config, db_path, stage, asset_ids, retry_ids, database)
+    metadata_selection = MetadataSelection(metadata_fields, fill_other_metadata)
     routes = metadata_routes.parse_route_overrides(route_overrides)
     path = Path(state_file) if state_file is not None else state_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2256,6 +2268,7 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                      followups=[],
                      started_at=time.time(), error='')
         state.update(initial_estimate(config, db_path, stage, scope_ids, speed_mode))
+        state.update(metadata_selection.options)
         state['steps'] = _processing_steps(stage, scope_ids,
             metadata_only_enabled=metadata_only(config.directory('state')))
         _restore_processing_counts(state, resume_state)
@@ -2350,7 +2363,7 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                 return state
             output = candidate_root / 'library-metadata-field-candidates.csv'
             groups = {row['item_key']: row for row in read_rows(output, missing_ok=True)}
-            scoped_groups = lambda: _candidate_scope(groups, scope_ids)
+            scoped_groups = lambda: metadata_selection.groups(_candidate_scope(groups, metadata_selection.scope(scope_ids)))
             listing = _DirectoryIndex()
             local_evidence = _LocalEvidenceCache(config, db_path, cover_root, listing, state, path)
             csv_dirty = False
@@ -2372,11 +2385,12 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                 row = _candidate_baseline(database, row, code, verify_existing)
                 for source, document, evidence_path in entries:
                     _merge_candidates(groups, row, code, source, document, evidence_path, genre_decisions,
-                                      local_fields, verify_existing=verify_existing)
+                                      local_fields, verify_existing=verify_existing, only_fields=metadata_selection.allowed)
                 csv_dirty = True
                 selected = [groups[key] for field in LABELS
                             if (key := f"asset:{row['id']}:{field}") in groups]
-                landed = _apply_finished_candidates(database, candidate_root, active, [row['id']], selected)
+                landed = _apply_finished_candidates(database, candidate_root, active, [row['id']], selected,
+                                                   **metadata_selection.apply_options)
                 state['auto_applied'] += landed['applied']
                 state['auto_rejected'] += landed['auto_rejected']
                 flush_candidates()
@@ -2384,19 +2398,21 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
 
             prepared = []
             poster_jobs = []
-            local_rows = list(checkpoints.remaining_metadata(rows))
-            completed_count = len(rows) - len(local_rows)
+            metadata_rows = metadata_selection.rows(rows, state, pending)
+            local_rows = list(checkpoints.remaining_metadata(metadata_rows))
+            completed_count = len(metadata_rows) - len(local_rows)
             for index, (_, row) in enumerate(local_rows):
                 guard.check()
                 issues_before = state['issue_count']
-                update(stage='检查配套文件', checked=completed_count + index, total=len(rows),
+                update(stage='检查配套文件', checked=completed_count + index, total=len(metadata_rows),
                        current_asset_id=row['id'], current_asset_name=Path(str(row['name'] or '')).name,
                        current_action='reading_local', current_started_at=time.time(),
                        current_deadline_at=None)
-                local = local_evidence.read(row, update, issue, poster_jobs)
+                local = local_evidence.read(row, update, issue, poster_jobs if metadata_selection.fields is None else [])
                 if local is None:
                     continue
                 code, verify_existing, payload, entries = local
+                verify_existing = metadata_selection.verify(verify_existing)
                 local_fields = _fields(payload, genre_decisions) if payload else {}
                 publish(row, code, local_fields, verify_existing, entries)
                 if code or payload:
@@ -2437,8 +2453,8 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                        total=completed_count + len(prepared), current_asset_id=row['id'],
                        current_asset_name=Path(str(row['name'] or '')).name)
                 target_key = f"asset:{row['id']}"
-                missing = list(COLLECTED_FIELDS) if verify_existing else _missing_fields(row, local_fields)
-                found, covers = remote.collect(row, code, missing, cover_root, update=update, issue=issue,
+                missing = metadata_selection.wanted(row, local_fields, verify_existing, database=database, code=code)
+                found, covers = metadata_selection.collect(remote, row, code, missing, cover_root, update=update, issue=issue,
                     answered=() if verify_existing else _answered_sources(groups, target_key, missing),
                     received=lambda entries, row=row, code=code, fields=local_fields, verify=verify_existing:
                         publish(row, code, fields, verify, entries))
@@ -2456,8 +2472,9 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
             # 候选完整落盘后立即执行调用方注入的窄规则，不再等人打开复核页才触发。
             # 核心处理层不反向依赖 Web 复核层；CLI 与 Web 两个组装入口都传入同一实现。
             summary = _finish_collection(
-                config, database, candidate_root, cover_root, groups, remote, asset_ids=scope_ids,
-                active=active, update=update, issue=issue, watermark=entity_watermark, covered=covered)
+                config, database, candidate_root, cover_root, groups, remote, asset_ids=metadata_selection.scope(scope_ids),
+                active=active, update=update, issue=issue, watermark=entity_watermark, covered=covered,
+                metadata_selection=metadata_selection)
             summary['auto_applied'] = summary.get('auto_applied', 0) + state['auto_applied']
             summary['auto_rejected'] = summary.get('auto_rejected', 0) + state['auto_rejected']
             finish_step('collect')

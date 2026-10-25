@@ -9,6 +9,8 @@ import { queryClient } from '../query';
 import { SelectField } from '../settings-panel/legacy-controls';
 import { busyProps, useAction } from '../settings/use-action';
 import { itemKey } from './item-detail';
+import { MetadataFields } from './metadata-fields';
+import { ALL_METADATA_FIELDS, type MetadataField } from '../library-processing/metadata-options';
 
 export const ITEM_METADATA_URL = '/api/item-metadata';
 export interface ItemMetadataData {
@@ -39,6 +41,8 @@ function MetadataPanel({ id, onReceipt }: { id: number; onReceipt(message: strin
     queryFn: ({ signal }) => apiGet<ItemMetadataData>(`${ITEM_METADATA_URL}?id=${id}`, signal),
     refetchInterval: result => result.state.data?.busy ? 1500 : false });
   const [sources, setSources] = useState<string[]>([]);
+  const [fields, setFields] = useState<MetadataField[]>(ALL_METADATA_FIELDS);
+  const [fillOther, setFillOther] = useState(true);
   const [choices, setChoices] = useState<Record<string, string>>({});
   const action = useAction();
   const data = query.data;
@@ -76,8 +80,9 @@ function MetadataPanel({ id, onReceipt }: { id: number; onReceipt(message: strin
       </span>
       {sources.length ? <Button variant="secondary" disabled={busy} onClick={() => setSources([])}>使用默认来源顺序</Button> : null}
     </fieldset>
-    <Button variant="secondary" disabled={data.busy} {...busyProps(action.busy === 'fetch')}
-      onClick={() => submit('fetch', { action: 'fetch', sources })}>查询最新资料</Button>
+    <MetadataFields fields={fields} fillOther={fillOther} disabled={busy} onFields={setFields} onFillOther={setFillOther} />
+    <Button variant="secondary" disabled={data.busy || !fields.length} {...busyProps(action.busy === 'fetch')}
+      onClick={() => submit('fetch', { action: 'fetch', sources, metadata_fields: fields, fill_other_metadata: fillOther })}>查询最新资料</Button>
     {running ? <LoadingDots label={data.job.stage || '正在查询资料来源'} /> : null}
     {data.busy && !running ? <Note tone="neutral">另一项单档资料查询正在进行，请稍后重试。</Note> : null}
     {problem ? <Note tone="warning">{problem}</Note> : null}

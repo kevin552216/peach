@@ -13,5 +13,12 @@
 !web/**
 !resources/
 !resources/**
+!tools/
+tools/**
+!tools/amane-bridge/
+tools/amane-bridge/**
+!tools/amane-bridge/bridge.py
+!tools/amane-bridge/pyproject.toml
+!tools/amane-bridge/uv.lock
 **/__pycache__/
 **/*.pyc

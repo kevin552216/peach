@@ -14,6 +14,8 @@ from peach.appid import MACOS_BUNDLE_ID
 identity = Path(os.environ["PEACH_MACOS_BUILD_INFO"])
 version = json.loads(identity.read_text(encoding="utf-8"))["version"]
 datas = [(str(root / name), name) for name in ("web", "migrations", "resources")]
+datas += [(str(root / "tools" / "amane-bridge" / name), "tools/amane-bridge")
+          for name in ("bridge.py", "pyproject.toml", "uv.lock")]
 datas += [(str(identity), "."), (str(root / "scripts" / "standalone.txt"), ".")]
 datas += [(str(root / "LICENSE"), ".")]
 datas += copy_metadata("sentry-sdk")

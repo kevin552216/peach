@@ -56,11 +56,13 @@ it('默认补全与下拉分项都只提交当前缺图影片，菜单包含主�
     const menu = document.querySelector('[role="dialog"]')!;
     expect(buttonNamed('同步这些影片', menu)).not.toBeNull();
     await click(buttonNamed(label, menu));
+    if (label === '仅补全资料') await click(buttonNamed('开始任务'));
   }
   expect(posts).toEqual([
     { stage: 'collect', asset_ids: [7, 8] },
     { stage: 'previews', asset_ids: [7, 8] },
-    { stage: 'metadata', asset_ids: [7, 8] },
+    { stage: 'metadata', asset_ids: [7, 8], metadata_fields: ['title', 'performers', 'studio', 'release_date', 'tags'],
+      fill_other_metadata: true },
   ]);
 });
 

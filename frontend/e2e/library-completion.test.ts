@@ -12,6 +12,49 @@ describe('缺预览时的统一补全入口', () => {
   before(async () => { browser = await launch() });
   after(async () => { await browser?.close() });
 
+  for (const viewport of [VIEWPORTS.find(one => !one.mobile)!, VIEWPORTS.find(one => one.mobile)!]) {
+    it(`${viewport.name}：按缺失字段派任务，可选择顺带补空`, { timeout: 60_000 }, async () => {
+      const opened = await openItemPage(browser, '/', viewport, { ready: '[data-media-card]' });
+      const { page } = opened;
+      try {
+        const posts: Record<string, unknown>[] = [];
+        await page.route(url => url.pathname === '/api/items', route => route.fulfill({ json: {
+          items: [{ id: 11, name: '待补资料的本地影片.mp4', medium: 'video', location: 'local',
+            has_thumb: false, has_local_poster: false, size: 12345, duration: 3600 }], total: 1, has_more: false,
+        } }));
+        await page.route(url => url.pathname === '/api/library-processing', route => {
+          if (route.request().method() === 'POST') posts.push(route.request().postDataJSON());
+          return route.fulfill({ json: { status: 'idle' } });
+        });
+        await page.reload({ waitUntil: 'load' });
+        const prompt = page.locator('[data-library-completion]');
+        await prompt.getByRole('button', { name: '更多同步方式' }).click();
+        await page.getByRole('dialog', { name: '同步方式' }).getByRole('button', { name: '仅补全资料' }).click();
+        const dialog = page.locator('dialog[open]');
+        await dialog.locator('[data-metadata-options]').waitFor();
+        for (const field of ['title', 'release_date', 'tags']) {
+          await dialog.locator(`label:has(input[name="metadata-field"][value="${field}"])`).click();
+        }
+        const other = dialog.getByRole('checkbox', { name: '顺便补齐其他缺失资料', exact: true });
+        assert.equal(await other.isChecked(), true);
+        if (!viewport.mobile) { await other.focus(); await page.keyboard.press('Space') }
+        assert.equal(posts.length, 0);
+        assert.equal(await dialog.locator('input[name="metadata-field"]:checked').count(), 2);
+        assert.deepEqual((await layout(page)).offenders, []);
+        const artifacts = path.resolve('..', 'build', 'agent-verification', 'metadata-selection');
+        await mkdir(artifacts, { recursive: true });
+        await page.screenshot({ path: path.join(artifacts, `${viewport.name}.png`) });
+        await dialog.getByRole('button', { name: '开始任务', exact: true }).click();
+        assert.equal(posts.length, 1);
+        assert.equal(posts[0]!.stage, 'metadata');
+        assert.deepEqual(posts[0]!.asset_ids, [11]);
+        assert.deepEqual(posts[0]!.metadata_fields, ['performers', 'studio']);
+        assert.equal(posts[0]!.fill_other_metadata, viewport.mobile);
+        assert.deepEqual(opened.problems, []);
+      } finally { await opened.close() }
+    });
+  }
+
   for (const viewport of VIEWPORTS) {
     it(`${viewport.name}：菜单可用且不溢出，补全结束后卡面显示预览`, async () => {
       const opened = await openItemPage(browser, '/', viewport, { ready: '[data-media-card]' });

@@ -2455,7 +2455,7 @@ def process_library(config, db_path, candidate_root, cover_root, *, location='co
                 target_key = f"asset:{row['id']}"
                 missing = metadata_selection.wanted(row, local_fields, verify_existing, database=database, code=code)
                 found, covers = metadata_selection.collect(remote, row, code, missing, cover_root, update=update, issue=issue,
-                    answered=() if verify_existing else _answered_sources(groups, target_key, missing),
+                    answered=metadata_selection.answered(groups, target_key, missing, verify_existing),
                     received=lambda entries, row=row, code=code, fields=local_fields, verify=verify_existing:
                         publish(row, code, fields, verify, entries))
                 state['covers'] += covers

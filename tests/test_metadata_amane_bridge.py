@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import asyncio
 import io
 import json
 from pathlib import Path
@@ -22,6 +23,19 @@ def load_bridge():
 
 
 bridge = load_bridge()
+
+
+class AgentClientTests(unittest.TestCase):
+    def test_request_keeps_other_headers_and_uses_the_selected_agent(self):
+        class Client:
+            def __init__(self, **options):
+                self.options = options
+            async def request(self, method, url, **kwargs):
+                return method, url, kwargs
+        client = bridge.agent_client(Client, 'Test Browser/1', proxy='http://localhost:7890')
+        result = asyncio.run(client.request('GET', 'https://example.test/', headers={'Accept': 'text/html', 'user-agent': 'old'}))
+        self.assertEqual(result[2]['headers'], {'Accept': 'text/html', 'User-Agent': 'Test Browser/1'})
+        self.assertEqual(client.options['proxy'], 'http://localhost:7890')
 
 
 class FakeSourceError(Exception):

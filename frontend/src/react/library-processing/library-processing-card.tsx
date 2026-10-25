@@ -30,6 +30,8 @@ import { useLibraryProcessingJob } from './use-library-processing';
 import { ProcessingActions } from './processing-actions';
 import { ProcessingControls } from './processing-controls';
 import { ProcessingProgress } from './processing-line';
+import { downloadIssueList, exportProcessingIssues } from './issue-export';
+import { busyProps, useAction } from '../settings/use-action';
 
 /* 中文正文写成常量：JSX 里换行的文字会在接缝处多出一个空格，中文句子里看得见。
    卡片正文与首屏骨架共用 `SCAN_CARD_TEXT`（`management.ts`）。 */
@@ -64,6 +66,7 @@ function Outcome(
   },
 ) {
   const details = issueDetails(state);
+  const exporter = useAction();
   const retryable = state.status === 'failed' && !!state.retryable_asset_ids?.length;
   const notes = notesLine(state.notes || {});
   /* 清单是这一页唯一自己滚的块，原生滚动条在这儿就是一条系统灰柱子。 */
@@ -119,6 +122,14 @@ function Outcome(
       {settled?.status === 'complete'
         ? <Note tone="success" title="处理完成">{receiptText(settled)}</Note>
         : null}
+      {state.issue_count && !processingActive(state) ? <div className="flex flex-col items-start gap-2">
+        <Button variant="secondary" {...busyProps(!!exporter.busy)} onClick={() => void exporter.run('export',
+          signal => exportProcessingIssues(state, signal), contents => {
+            downloadIssueList(state.job_id!, contents);
+            toast('已导出失败清单');
+          })}>导出失败清单</Button>
+        {exporter.error ? <Note tone="warning">{exporter.error}</Note> : null}
+      </div> : null}
       {!processingActive(state) && notes
         ? <Note tone="neutral"
             extra={state.issues_log

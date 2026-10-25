@@ -94,9 +94,11 @@ const quiet = (overrides: Partial<Source> = {}) => ({
   'GET /api/scraping/cover': () => ({ body: { status: 'idle' } }),
   'GET /api/scraping/amane-bridge': () => ({ body: BRIDGE }),
   'GET /api/custom-metadata': () => ({ body: { items: [] } }),
+  'GET /api/metadata-preferences': () => ({ body: { user_agent: 'Chrome', default_user_agent: 'Chrome', routes: {},
+    types: [{ id: 'fc2', sources: [{ id: 'fc2', label: 'FC2' }, { id: 'fc2cmadb', label: 'FC2CMADB' }] }] } }),
 });
 /** 首屏来源与任务数据的请求顺序，和 `prefetchScraping` 一致。 */
-const FIRST_SCREEN = ['/api/scraping', '/api/scraping/cover', '/api/scraping/amane-bridge', '/api/custom-metadata'];
+const FIRST_SCREEN = ['/api/scraping', '/api/scraping/cover', '/api/scraping/amane-bridge', '/api/custom-metadata', '/api/metadata-preferences'];
 
 const password = (root: ParentNode) => root.querySelector<HTMLInputElement>('input[type=password]');
 const radio = (value: string) => document.querySelector<HTMLInputElement>(`input[type=radio][value="${value}"]`);

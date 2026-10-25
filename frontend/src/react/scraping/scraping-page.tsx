@@ -32,6 +32,7 @@ import {
 } from '../settings/section';
 import { busyProps } from '../settings/use-action';
 import { CustomSources } from './custom-sources';
+import { MetadataPreferences } from './metadata-preferences';
 import {
   AMANE_BRIDGE_CHECK_URL, AMANE_BRIDGE_KEY, AMANE_BRIDGE_REBUILD_URL,
   checkText, COOKIE_TEXT_LIMIT, COVER_JOB_KEY, fetchAmaneBridge, fetchCoverJob,
@@ -360,6 +361,7 @@ export function ScrapingPage({ toast }: ScrapingProps) {
       <p className="text-body-2-regular text-text-secondary">高清图片可能要经代理才能下载，先检查连接。</p>
       <CoverCard toast={toast} />
       <CustomSources receipt={toast} />
+        <MetadataPreferences receipt={toast} />
       {(data.sources || []).map(
         (source) => <SourceCard key={source.source} source={source} toast={toast} />)}
       <AmaneBridgeCard toast={toast} />

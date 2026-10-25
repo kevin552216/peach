@@ -367,12 +367,14 @@ class LibraryMetadataProvider:
             if timeout <= 1.0:
                 raise DeadlineExceeded('外部资料在预算时间内未取得')
         try:
+            from .metadata_preferences import load as preferences
             bridge = metadata_amane.AmaneBridge.create(
                 self.tools_root if self.tools_root is not None else TOOLS_DIR)
             direct_sites = [site for site in sites if values_for(self.secrets_root, site).get('network') == 'direct']
             report = bridge.query(code, sites, timeout=timeout,
                                   proxy_options={'trust_env': False} if len(direct_sites) == len(sites)
-                                  else peach_proxy.client_options(self.secrets_root), direct_sites=direct_sites)
+                                  else peach_proxy.client_options(self.secrets_root), direct_sites=direct_sites,
+                                  user_agent=preferences(self.secrets_root)['user_agent'])
         except Exception as error:  # noqa: BLE001 - 桥没装、venv 坏了、超时：整档未取得，原因给人看
             return Unavailable(f'amane 桥：{str(error).strip() or describe_failure(error)}')
         raw_sites = report.get('sites')
@@ -1288,7 +1290,8 @@ class _RemoteSession:
         self._provider = None
         self.misses = misses
         #: 用户对每种内容类型的来源链覆盖，形状见 `metadata_routes.parse_route_overrides`。
-        self._routes = routes or None
+        from .metadata_preferences import load
+        self._routes = {**load(config.directory('secrets'))['routes'], **(routes or {})} or None
         # 「重试未完成项」按上一任务的失败集合强制重试，不看记忆；答复仍照记。
         self._consult = not retrying
         self._task_evidence = {}

@@ -88,7 +88,19 @@ class Runtime:
     version: str = ""
 
 
-def load_runtime() -> Runtime:
+def agent_client(client_type, user_agent: str, **options):
+    """通过上游公开请求入口补上本机选择的浏览器身分。"""
+    if not user_agent:
+        return client_type(**options)
+    class AgentClient(client_type):
+        async def request(self, method, url, **kwargs):
+            headers = {key: value for key, value in (kwargs.pop('headers', None) or {}).items()
+                       if key.lower() != 'user-agent'}
+            return await super().request(method, url, headers={**headers, 'User-Agent': user_agent}, **kwargs)
+    return AgentClient(**options)
+
+
+def load_runtime(user_agent: str = '') -> Runtime:
     """真实 amane。只在这里 import，单测不必装它。"""
     import importlib
 
@@ -121,7 +133,7 @@ def load_runtime() -> Runtime:
         # Peach 用 60 秒子进程总时限约束整次查询。不带 BrowserClient：挑战页报
         # `cloudflare_challenge`，不切浏览器渲染。
         limiters = RateLimiters(default_rate=rate)
-        return HttpClient(WebClient(limiters=limiters, proxy=proxy, timeout=timeout, max_retries=1))
+        return HttpClient(agent_client(WebClient, user_agent, limiters=limiters, proxy=proxy, timeout=timeout, max_retries=1))
 
     return Runtime(
         crawler=crawler, make_client=make_client,
@@ -214,6 +226,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--proxy", default=None,
                         help="代理地址；不给就不走代理（libcurl 仍会读环境变量）")
     parser.add_argument("--direct-sites", default="", help="本次查询中强制直连的站名，逗号分隔")
+    parser.add_argument("--user-agent", default="", help="HTTP 浏览器身分，留空沿用上游默认")
     parser.add_argument("--timeout", type=float, default=30.0, help="单次请求超时（秒）")
     parser.add_argument("--rate", type=float, default=0.5, help="每主机每秒请求数上限")
     parser.add_argument("--output", default="json", choices=("json",))
@@ -236,8 +249,11 @@ def main(argv: list[str] | None = None, runtime: Runtime | None = None,
         message = ("未知站名：" + "、".join(unknown)) if unknown else "番号与站名都不能为空"
         print(json.dumps({"error": message}, ensure_ascii=False), file=out, flush=True)
         return EXIT_USAGE
+    if len(args.user_agent) > 512 or any(ord(char) < 32 or ord(char) > 126 for char in args.user_agent):
+        print(json.dumps({'error': 'User-Agent 须为 512 字以内的单行文字'}), file=out, flush=True)
+        return EXIT_USAGE
     try:
-        active = runtime or load_runtime()
+        active = runtime or load_runtime(args.user_agent)
     except Exception as error:  # noqa: BLE001 - venv 坏了也要以 JSON 报出去
         print(json.dumps({"error": f"amane 加载失败：{type(error).__name__}: {error}"},
                          ensure_ascii=False), file=out, flush=True)

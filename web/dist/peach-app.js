@@ -71271,6 +71271,28 @@ function CRe({ source: e, toast: t }) {
 					}, e))
 				})
 			}) }),
+			e.rate ? /* @__PURE__ */ (0, C.jsxs)(J, {
+				tone: "neutral",
+				children: [
+					"请求 ",
+					e.rate.requests,
+					" · 成功 ",
+					e.rate.successes,
+					" · 异常 ",
+					e.rate.failures,
+					" · ",
+					"当前间隔 ",
+					e.rate.interval,
+					" 秒",
+					" · ",
+					"HTTP 404：",
+					e.rate.http_404,
+					" · 限流：",
+					e.rate.rate_limited,
+					" · 拒绝：",
+					e.rate.blocked
+				]
+			}) : null,
 			e.cooldown_until && e.cooldown_until > Date.now() / 1e3 ? /* @__PURE__ */ (0, C.jsxs)(J, {
 				tone: "warning",
 				children: ["来源正在冷却，截止 ", (/* @__PURE__ */ new Date(e.cooldown_until * 1e3)).toLocaleString("zh-CN")]

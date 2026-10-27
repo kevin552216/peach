@@ -27,6 +27,10 @@ class ScrapingAccessTests(unittest.TestCase):
         finder = patch("peach.browser_transport.find_browser", return_value=None)
         finder.start()
         self.addCleanup(finder.stop)
+        # 这些用例验证会话、凭据和冷却，真实跨进程节奏在 test_source_pacing 验证。
+        pacing = patch('peach.scraping_access.SourcePacer')
+        pacing.start().return_value.wait.side_effect = lambda _source, timeout: timeout
+        self.addCleanup(pacing.stop)
 
     def test_independent_installations_never_share_session_or_proxy(self):
         peach_proxy.save(self.root, {"mode": "proxy", "proxy": "http://user:private-proxy@127.0.0.1:7890"})
@@ -308,7 +312,7 @@ class ScrapingAccessTests(unittest.TestCase):
         """`cf_clearance` 绑着解题那台浏览器的 UA：整站 UA 与用户的 Chrome 一致，Cookie 由用户贴，卡上不另收 UA。"""
         from peach.user_agent import USER_AGENT
         shown = save(self.root, "fc2ppvdb", {"cookie": "cf_clearance=abc"})
-        self.assertEqual(set(shown), {"source", "label", "login", "accepts_cookie", "network", "cookie_saved", "browser", "cooldown_until"})
+        self.assertEqual(set(shown), {"source", "label", "login", "accepts_cookie", "network", "cookie_saved", "browser", "cooldown_until", "rate"})
         self.assertTrue(shown["cookie_saved"])
         self.assertFalse(shown["browser"], "没有浏览器的机器上这张卡照旧收 Cookie")
         for name in ("fc2ppvdb", "javten"):
@@ -561,6 +565,9 @@ class BrowserFallbackTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.cooldown = self.root / "scraping-minnano-av.cooldown.json"
+        pacing = patch('peach.scraping_access.SourcePacer')
+        pacing.start().return_value.wait.side_effect = lambda _source, timeout: timeout
+        self.addCleanup(pacing.stop)
         self.request = HttpRequest("GET", self.SEARCH, {})
         finder = patch("peach.browser_transport.find_browser", return_value=None)
         finder.start()

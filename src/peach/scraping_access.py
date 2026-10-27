@@ -23,6 +23,7 @@ from . import browser_transport, peach_proxy
 from .http import HttpRequest, HttpxTransport
 from .scripting import host_under, hostname_of
 from .fsutil import atomic_write_text
+from .source_pacing import SourcePacer, rate_state
 
 LOGGER = logging.getLogger(__name__)
 
@@ -317,6 +318,7 @@ def describe(root: Path, source: str) -> dict:
             "network": "direct" if values.get("network") == "direct" else "peach",
             "cookie_saved": bool(values.get("cookie") or values.get("cookies_text")),
             "cooldown_until": until or None,
+            "rate": rate_state(root, source),
             # 这台机器上这个来源是不是由本机浏览器过验证：该走浏览器（`wants_browser`）且找得到浏览器。
             "browser": wants_browser(root, source) and browser_transport.find_browser() is not None}
 
@@ -408,12 +410,25 @@ class SourceTransport:
         from .processing_control import deadline_after
         self.deadline = deadline_after(max_seconds) if max_seconds else 0
         self.requests = self.bytes = 0
+        self.pacer = SourcePacer(secrets_root)
 
     def __call__(self, request: HttpRequest, timeout: float, max_bytes: int):
-        for _ in range(6):
+        deadline = time.monotonic() + timeout
+        retried_missing = False
+        for _ in range(7):
             from .processing_control import checkpoint
             checkpoint('network')
-            response = self._request(request, timeout, max_bytes)
+            response = self._request(request, max(0, deadline - time.monotonic()), max_bytes)
+            # 作品页的 HTTP 404 缺少结构化身份依据，不能直接冻结成七天查无资料。
+            if (response.status == 404 and request.method == 'GET'
+                    and source_for(request.url) == 'fc2cmadb'
+                    and urlsplit(request.url).path.startswith('/articles/')):
+                if not retried_missing:
+                    retried_missing = True
+                    continue
+                from .jav_cover_fetch import Unavailable
+                raise Unavailable('FC2CMADB 作品页返回 404，减速复查后仍未取得；'
+                                  '尚未确认作品不存在，可稍后重试')
             if response.status not in {301, 302, 303, 307, 308} or not response.headers.get("location"):
                 return response
             target = urljoin(request.url, response.headers["location"])
@@ -447,15 +462,23 @@ class SourceTransport:
         via = self._via(source)
         until, blocks = _state_for(self.root, key, via)
         if until > time.time():
-            raise SourcePaused("来源正在冷却，请稍后重试；已有图片保留")
+            minutes = max(1, math.ceil((until - time.time()) / 60))
+            raise SourcePaused(f"来源正在冷却，约 {minutes} 分钟后可重试；本次未请求网站，已有图片保留")
         if source not in self.transports:
             self.transports[source] = self._transport_for(source)
+        timeout = self.pacer.wait(key, timeout)
+        # 等待期间另一任务可能触发整站冷却，发出请求前再次检查。
+        until, blocks = _state_for(self.root, key, via)
+        if until > time.time():
+            raise SourcePaused('来源正在冷却，本次未请求网站；已有图片保留')
         self.requests += 1
         try:
             response = self.transports[source](request, timeout, max_bytes)
         except (httpx.HTTPError, browser_transport.BrowserUnavailable):
+            self.pacer.record(key, 0)
             raise httpx.TransportError("来源连接未取得，请检查该来源的网络设置") from None
         except browser_transport.ChallengeUnsolved:
+            self.pacer.record(key, 403)
             blocks += 1
             _pause(cooldown, time.time() + min(FIRST_BLOCKED_PAUSE * 2 ** (blocks - 1),
                                                SOURCES[source]["blocked_pause"]), blocks, via)
@@ -468,6 +491,7 @@ class SourceTransport:
                 cooldown.unlink(missing_ok=True)
                 response, via, blocks = verified, VIA_BROWSER, 0
         self.bytes += len(response.body)
+        self.pacer.record(key, response.status)
         if response.status == 429:
             retry = response.headers.get("retry-after", "")
             try:

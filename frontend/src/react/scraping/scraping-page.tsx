@@ -168,6 +168,11 @@ function SourceCard({ source, toast }: { source: Source } & ScrapingProps) {
           </Select>
         </SettingsRow>
       </Rows>
+      {source.rate ? (
+        <Note tone="neutral">请求 {source.rate.requests} · 成功 {source.rate.successes} · 异常 {source.rate.failures}
+          {' · '}当前间隔 {source.rate.interval} 秒
+          {' · '}HTTP 404：{source.rate.http_404} · 限流：{source.rate.rate_limited} · 拒绝：{source.rate.blocked}</Note>
+      ) : null}
       {source.cooldown_until && source.cooldown_until > Date.now() / 1000 ? (
         <Note tone="warning">来源正在冷却，截止 {new Date(source.cooldown_until * 1000).toLocaleString('zh-CN')}</Note>
       ) : null}

@@ -70,6 +70,15 @@ const page = (toast: (message: string) => void) => (
   <QueryClientProvider client={queryClient}><ScrapingPage toast={toast} /></QueryClientProvider>
 );
 
+it('分别展示来源的请求计数和当前自适应间隔', async () => {
+  const { host } = await open(quiet({
+    rate: { requests: 12, successes: 10, failures: 2, http_404: 1, rate_limited: 1, blocked: 0, interval: 5 },
+  }));
+  expect(host.textContent).toContain('请求 12 · 成功 10 · 异常 2');
+  expect(host.textContent).toContain('当前间隔 5 秒');
+  expect(host.textContent).toContain('HTTP 404：1');
+});
+
 /** 走完真实的首屏路径：先 prefetch 落进缓存，再挂载。 */
 async function open(handlers: Record<string, (body: never) => Reply | Promise<Reply>>) {
   const toast = vi.fn();

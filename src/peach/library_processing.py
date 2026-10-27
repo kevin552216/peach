@@ -226,6 +226,8 @@ MISS_MESSAGES = {'querying_metadata': '外部来源没有这部片的资料，7 
                  'fetching_cover': '外部来源没有这部片的封面，7 天内不再问'}
 #: 日志里的写法反查回上面的键，界面按键取自己的短标签。
 NOTE_KEYS = {message: key for key, message in MISS_MESSAGES.items()}
+# 来源缺失判据升级时，只废弃该来源未注明判据版本的旧记忆。
+MISS_SEMANTICS = {'fc2cmadb': 2}
 
 #: 状态文件与候选 CSV 的落盘节流。页面轮询读的是内存里的任务快照，文件只为进程没了
 #: 之后还能看到最后状态；候选 CSV 随处理进度越写越大，每条资产都重写一遍是平方级开销。
@@ -1261,6 +1263,8 @@ class _MissCache:
                     self._joined[site] = self._now()
         self._entries = {}
         for source, codes in (loaded.get('misses') or {}).items():
+            if source in MISS_SEMANTICS and (loaded.get('semantics') or {}).get(source) != MISS_SEMANTICS[source]:
+                continue
             if isinstance(codes, dict):
                 self._entries[source] = {code: float(stamp) for code, stamp in codes.items()
                                          if isinstance(stamp, (int, float))}
@@ -1277,6 +1281,7 @@ class _MissCache:
         self._entries.setdefault(source, {})[code] = now
         _save(self._path, {
             'format': MISS_FORMAT, 'sites': self._sites,
+            'semantics': MISS_SEMANTICS,
             'joined': {site: stamp for site, stamp in self._joined.items() if now - stamp < self._ttl},
             'misses': {name: {key: stamp for key, stamp in codes.items() if now - stamp < self._ttl}
                        for name, codes in self._entries.items()}})
@@ -2262,6 +2267,7 @@ def _processing_issue_record(asset, message, action, retryable, paused):
     asset = asset or {}
     severity, retryable = _issue_classification(message, retryable, paused)
     return dict(asset_id=asset.get('id'),
+                code=str(asset.get('code') or ''),
                 title=str(asset.get('catalog_title') or '') or Path(str(asset.get('name') or '')).name,
                 path=str(asset.get('path') or ''), message=message, severity=severity,
                 failed_action=action, retryable=retryable, last_failed_at=time.time())

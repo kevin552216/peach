@@ -41,6 +41,11 @@ const indexEntries = (page: Page): Locator =>
 const statsInventoryTab = (page: Page): Locator =>
   page.locator('#stats').getByRole('tab', { name: /^馆藏视频/ });
 
+/** 路由冒烟和轮询用例使用确定的空列表，独立于同一演示库里的任务派发。 */
+const emptyTasks = (page: Page): Promise<void> => page.route('**/api/tasks', route => route.fulfill({
+  json: { available: true, running: [], skipped: [], finished: [] },
+}));
+
 const ROUTES: readonly Route[] = [
   { path: '/works/EXM-001', body: page => [page.locator('#stage [data-jav-detail] h1'), page.getByRole('img', { name: 'EXM-001 封面', exact: true })] },
   { path: '/jav', body: page => [heading(page, '#javLibraryHeader', 'JAV'), page.getByRole('tab', { name: '馆藏', exact: true, selected: true }), page.locator('#grid [data-media-card]:visible, #grid [data-media-empty]:visible').first()] },
@@ -174,7 +179,8 @@ describe('路由冒烟', () => {
     for (const route of ROUTES) {
       // 单条超时远小于 Python 侧的整轮超时：卡住的那一条自己报名字，不拖垮整轮输出。
       it(`${route.path} @ ${viewport.name}`, { timeout: 60_000 }, async () => {
-        const opened = await visit(browser, route.path.startsWith('/works/') ? '/stats' : route.path, viewport);
+        const opened = await visit(browser, route.path.startsWith('/works/') ? '/stats' : route.path, viewport,
+          route.path === '/tasks' ? emptyTasks : undefined);
         try {
           if (route.path.startsWith('/works/')) {
             await mockJavDetail(opened.page);
@@ -207,7 +213,7 @@ describe('路由冒烟', () => {
      多数管理页直接 `innerHTML=`，根被挤出文档却照样活着——这一条盯的就是它有没有被卸掉。
      换页走 pushState + popstate：侧栏按钮、抽屉和浏览器后退最后走的都是这一条路。 */
   it('离开活动页之后轮询停下，回到这一页又接上', { timeout: 120_000 }, async () => {
-    const opened = await visit(browser, '/tasks', DESKTOP);
+    const opened = await visit(browser, '/tasks', DESKTOP, emptyTasks);
     try {
       const polls: string[] = [];
       opened.page.on('request', (request) => {

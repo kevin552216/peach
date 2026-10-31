@@ -137,9 +137,6 @@ function Outcome(
             {partial ? `\n${PARTIAL_RESULT_TEXT}` : null}
           </Note>
         : null}
-      {settled?.status === 'cancelled'
-        ? <Note tone="neutral" title="已停止扫描与采集">已保留处理结果，可以选择工作项目并派发新任务。</Note>
-        : null}
       {settled?.status === 'complete'
         ? <Note tone="success" title="处理完成">{receiptText(settled)}</Note>
         : null}

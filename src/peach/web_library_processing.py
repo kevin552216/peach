@@ -185,7 +185,7 @@ def _control_action(contract, config, body):
         identity = current_job_id.set(str(job_id))
         run = current_run.set(recovery.get('run_id'))
         try:
-            return w_library_processing(contract, {
+            return w_library_processing(contract, {**recovery.get('request', {}),
                 'stage': previous.get('requested_stage') or ALL_STAGES,
                 **({'incremental': True} if previous.get('incremental') else
                    {'asset_ids': previous['asset_ids']} if previous.get('asset_ids') else {}),

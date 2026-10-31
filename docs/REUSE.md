@@ -2,7 +2,7 @@
 
 ## 按来源共享计数与自适应请求节奏
 
-来源节奏复用既有 `SourceTransport`、`HostLimitedTransport`、已固定的 `filelock 4.2.0`（MIT，Python 3.11 及以上，支持 Windows/Python 3.14）和 `atomic_write_text`，不增加依赖。每个来源的预约、HTTP 状态计数及成功恢复由同一本机文件锁协调；不同来源分别预约，等待期间不持锁。计数只保存数量、状态码、间隔与时间，不保存 URL、作品名或凭据。测试使用可注入时钟、真实临时文件和两个 Python 进程验证共享计数。
+来源节奏复用既有 `SourceTransport`、`HostLimitedTransport`、已固定的 `filelock 4.2.4`（MIT，Python 3.11 及以上，支持 Windows/Python 3.14）和 `atomic_write_text`，不增加依赖。每个来源的预约、HTTP 状态计数及成功恢复由同一本机文件锁协调；不同来源分别预约，等待期间不持锁。计数只保存数量、状态码、间隔与时间，不保存 URL、作品名或凭据。测试使用可注入时钟、真实临时文件和两个 Python 进程验证共享计数。
 
 现有 HTTPX `0.28.1`（BSD-3-Clause）的传输与连接池继续负责 HTTP；其内置连接重试不包含跨进程、按业务来源共享的响应调速，见 [HTTPX transports](https://www.python-httpx.org/advanced/transports/)。Peach 只维护来源策略，不替换网络栈。FC2CMADB 作品页 HTTP 404 按当前来源节奏复查一次，仍未取得则保留为可重试异常，不宣称作品不存在。结构化身份核验的明确缺失仍走既有缺失记忆；该来源缺少判据版本的旧记忆单独失效，其余来源记忆保留。403、429 与浏览器验证继续遵守既有冷却，既不绕过验证也不清空冷却。
 

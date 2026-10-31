@@ -56,6 +56,32 @@ class SelectedProcessingTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             return [dict(row) for row in connection.execute('SELECT * FROM asset ORDER BY id')]
 
+    def test_selected_metadata_skip_keeps_the_next_asset_eligible(self):
+        self.seed(count=2)
+        observed = []
+        answer = self.provider.query.return_value
+        def query(*_args, **_kwargs):
+            control = control_for(self.config)
+            observed.append(control.current_asset_id)
+            if control.current_asset_id == 1:
+                control.skip_current(control.job_id, 1)
+                checkpoint('network')
+            return answer
+        self.provider.query.side_effect = query
+        result = self.run_selected(['metadata'])
+        self.assertEqual(result['retryable_asset_ids'], [1])
+        self.assertEqual(set(observed), {1, 2})
+        self.assertIsNone(self.rows()[0]['catalog_title'])
+        self.assertEqual(self.rows()[1]['catalog_title'], '来源标题')
+
+    def test_selected_network_work_obeys_the_library_processing_policy(self):
+        self.seed()
+        with patch('peach.library_processing._library_stages', return_value=lambda _path: {'probe', 'preview'}):
+            result = self.run_selected(['metadata', 'covers'])
+        self.assertEqual(result['status'], 'complete', result)
+        self.provider.query.assert_not_called()
+        self.provider.cover.assert_not_called()
+
     def test_probe_and_metadata_have_no_image_work_and_preserve_existing_title(self):
         self.seed(title='人工标题')
         measurement = (123.0, 1920, 1080, 'h264', 24.0, 1, '速食', '横屏', '2K', 1)

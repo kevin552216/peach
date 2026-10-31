@@ -16,7 +16,7 @@ from . import library_processing as engine
 from .jobs import DiskGuard, JobPaused
 from .media_processing_policy import metadata_only
 from .processing_control import (ProcessingStopped, bind_control, checkpoint, initial_estimate,
-                                 resume_fields, task_control)
+                                 resume_fields, task_control, processing_item, ItemSkipped)
 from .review_csv import read_rows, write_rows
 from .update_tasks import activity
 
@@ -414,7 +414,13 @@ class SelectedProcessing:
             if 'cover' not in engine._library_stages(self.config)(row['path']):
                 continue
             code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
-            _, covers = self.get_remote().collect(row, code, [], self.cover_root, update=self.update, issue=self.issue)
+            try:
+                with processing_item(row['id']):
+                    _, covers = self.get_remote().collect(row, code, [], self.cover_root, update=self.update, issue=self.issue)
+            except ItemSkipped:
+                self.get_remote().reset()
+                self.issue(row, '已跳过这部影片，可在任务结束后重试', action='skipped', retryable=True)
+                continue
             self.covered.append((row['id'], covers))
             self.publish(covers=self.state['covers'] + covers, checked=index + 1)
 
@@ -571,10 +577,16 @@ class MetadataWork:
             return
         issues = runner.state['work_progress']['metadata']['failed']
         missing = self.selection.wanted(row, fields, verify_existing, database=runner.database, code=code)
-        found, _ = self.selection.collect(runner.get_remote(), row, code, missing, runner.cover_root,
-            update=runner.update, issue=runner.issue, include_covers=False,
-            answered=self.selection.answered(self.groups, f"asset:{row['id']}", missing, verify_existing),
-            received=lambda entries: self.publish(row, code, fields, entries, verify_existing))
+        try:
+            with processing_item(row['id']):
+                found, _ = self.selection.collect(runner.get_remote(), row, code, missing, runner.cover_root,
+                    update=runner.update, issue=runner.issue, include_covers=False,
+                    answered=self.selection.answered(self.groups, f"asset:{row['id']}", missing, verify_existing),
+                    received=lambda entries: self.publish(row, code, fields, entries, verify_existing))
+        except ItemSkipped:
+            runner.get_remote().reset()
+            runner.issue(row, '已跳过这部影片，可在任务结束后重试', action='skipped', retryable=True)
+            return
         with runner.lock:
             runner.checkpoints.queue_metadata(row, entries + found if local_ok else [], issues,
                 issue_count=runner.state['work_progress']['metadata']['failed'])

@@ -369,7 +369,8 @@ class SelectedProcessingTests(unittest.TestCase):
         request = dict(stage='previews', tasks=['previews'], speed_mode='low', execution_mode='parallel',
                        defer_suspected_duplicates=True)
         with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
-                patch('peach.library_processing._generate_previews', side_effect=media):
+                patch('peach.library_processing._generate_previews', side_effect=media), \
+                patch('peach.web_library_processing.process_library', wraps=process_library) as dispatched:
             state = w_library_processing(contract, request)
             self.assertTrue(entered.wait(3))
             w_library_processing(contract, dict(action='pause', job_id=state['job_id']))
@@ -396,6 +397,8 @@ class SelectedProcessingTests(unittest.TestCase):
         self.assertTrue(final['defer_suspected_duplicates'])
         self.assertEqual(final['status'], 'complete', final)
         self.assertEqual(calls, ['low', 'low'])
+        self.assertEqual(dispatched.call_args.kwargs['tasks'], ['previews'])
+        self.assertEqual(dispatched.call_args.kwargs['execution_mode'], 'parallel')
 
     def test_media_issue_does_not_invalidate_metadata_checkpoint(self):
         self.seed(duration=30)

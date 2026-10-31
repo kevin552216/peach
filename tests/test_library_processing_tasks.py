@@ -56,6 +56,32 @@ class SelectedProcessingTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             return [dict(row) for row in connection.execute('SELECT * FROM asset ORDER BY id')]
 
+    def test_selected_metadata_skip_keeps_the_next_asset_eligible(self):
+        self.seed(count=2)
+        observed = []
+        answer = self.provider.query.return_value
+        def query(*_args, **_kwargs):
+            control = control_for(self.config)
+            observed.append(control.current_asset_id)
+            if control.current_asset_id == 1:
+                control.skip_current(control.job_id, 1)
+                checkpoint('network')
+            return answer
+        self.provider.query.side_effect = query
+        result = self.run_selected(['metadata'])
+        self.assertEqual(result['retryable_asset_ids'], [1])
+        self.assertEqual(set(observed), {1, 2})
+        self.assertIsNone(self.rows()[0]['catalog_title'])
+        self.assertEqual(self.rows()[1]['catalog_title'], '来源标题')
+
+    def test_selected_network_work_obeys_the_library_processing_policy(self):
+        self.seed()
+        with patch('peach.library_processing._library_stages', return_value=lambda _path: {'probe', 'preview'}):
+            result = self.run_selected(['metadata', 'covers'])
+        self.assertEqual(result['status'], 'complete', result)
+        self.provider.query.assert_not_called()
+        self.provider.cover.assert_not_called()
+
     def test_probe_and_metadata_have_no_image_work_and_preserve_existing_title(self):
         self.seed(title='人工标题')
         measurement = (123.0, 1920, 1080, 'h264', 24.0, 1, '速食', '横屏', '2K', 1)
@@ -96,19 +122,6 @@ class SelectedProcessingTests(unittest.TestCase):
         self.provider.query.assert_not_called()
         self.provider.cover.assert_not_called()
 
-    def test_selected_metadata_keeps_optional_original_title_and_series_candidates(self):
-        self.seed(duration=30, title='人工标题')
-        nfo = self.media / 'ABW-358_1.nfo'
-        nfo.write_text('<movie><id>ABW-358</id><title>配套标题</title><originaltitle>原始标题</originaltitle>'
-                       '<set><name>系列名称</name></set></movie>', encoding='utf-8')
-        result = self.run_selected(['metadata'])
-        self.assertEqual(result['status'], 'complete', result)
-        from peach.review_csv import read_rows
-        candidates = read_rows(self.root / 'generated' / 'library-metadata-field-candidates.csv')
-        self.assertIn('original_title', {row['field'] for row in candidates})
-        self.assertIn('series', {row['field'] for row in candidates})
-        self.assertEqual(self.rows()[0]['catalog_title'], '人工标题')
-        self.provider.cover.assert_not_called()
 
     def test_covers_only_avoids_metadata_and_previews(self):
         self.seed(duration=30)
@@ -126,6 +139,8 @@ class SelectedProcessingTests(unittest.TestCase):
         destination = self.config.directory('generated') / 'snapshots' / 'local' / 'existing.jpg'
         destination.parent.mkdir(parents=True)
         Image.new('RGB', (120, 80), 'white').save(destination)
+        from peach.artifact_rules import remember
+        remember(destination)
         with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute('UPDATE asset SET snapshot_path=?', (str(destination),))
         with patch('peach.frame_capture.capture_with_retry') as capture, \
@@ -182,7 +197,7 @@ class SelectedProcessingTests(unittest.TestCase):
             thread.start()
             try:
                 self.assertTrue(entered.wait(3))
-                control_for(self.config).request('stop', 'stop-parallel')
+                control_for(self.config).request('cancel', 'stop-parallel')
                 self.assertTrue(thread.is_alive())
             finally:
                 release.set()

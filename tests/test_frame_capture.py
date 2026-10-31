@@ -23,6 +23,32 @@ class _Completed:
 
 
 class CaptureFrameTests(unittest.TestCase):
+    def test_hardware_decode_failure_retries_software_and_keeps_both_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            destination = root / 'frame.jpg'
+            calls = []
+            def run(command, **kwargs):
+                calls.append(command)
+                if '-hwaccel' in command:
+                    return subprocess.CompletedProcess(command, 1, stderr=b'unsupported hardware decoder')
+                Image.new('RGB', (480, 270)).save(command[-1], format='JPEG')
+                return subprocess.CompletedProcess(command, 0, stderr=b'')
+            for options in (None, ('-hwaccel', 'videotoolbox'), ()):
+                calls.clear()
+                detail = {}
+                with self.subTest(decode_options=options), \
+                        patch('peach.hardware_transcode.frame_decode_options', return_value=('-hwaccel', 'videotoolbox')) as probe, \
+                        patch.object(frame_capture.subprocess, 'run', side_effect=run):
+                    self.assertTrue(frame_capture.capture_with_retry(
+                        'ffmpeg', 'sample.mp4', 1, destination, diagnostics=detail, decode_options=options))
+                expected = [False] if options == () else [True, False]
+                self.assertEqual(len(calls), len(expected))
+                self.assertNotIn('-hwaccel', calls[-1])
+                self.assertEqual([attempt['hardware_decode'] for attempt in detail['attempts']], expected)
+                if options is not None:
+                    probe.assert_not_called()
+
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="frame-capture-")).resolve()
         self.addCleanup(lambda: shutil.rmtree(self.root, ignore_errors=True))
@@ -135,7 +161,7 @@ class CaptureFrameTests(unittest.TestCase):
             (b"", 1),
         ):
             self.commands = []
-            with self._run(produce=False, stderr=stderr):
+            with self._run(produce=False, stderr=stderr), patch('peach.error_reporting.subprocess_failure'):
                 ok = frame_capture.capture_with_retry("ffmpeg", "movie.mp4", 1.0,
                                                       self.root / "retry.jpg")
             self.assertFalse(ok)
@@ -167,10 +193,12 @@ class TileFramesTests(unittest.TestCase):
 
     def test_a_tile_that_did_not_land_is_not_reported_as_made(self):
         with patch.object(frame_capture.subprocess, "run",
-                          lambda command, **_kwargs: _Completed()):
+                          lambda command, **_kwargs: _Completed()), \
+                patch('peach.error_reporting.subprocess_failure') as report:
             made = frame_capture.tile_frames("ffmpeg", str(self.root / "s%03d.jpg"), 3, 3,
                                              self.root / "out" / "000.jpg")
         self.assertFalse(made)
+        self.assertEqual(report.call_args.kwargs['reason'], 'tile_unavailable')
 
 
 class FFmpegCaptureIntegrationTests(unittest.TestCase):

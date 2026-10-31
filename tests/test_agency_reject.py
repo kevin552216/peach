@@ -3,17 +3,14 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from pathlib import Path
 
 from peach.entities import normalize_entity_name, rejected_agencies
-from peach.migrations import upgrade
+from support.ledger import fresh_ledger
 from scripts.install_agencies import collect as agency_plan
 from scripts.reject_agency import apply_rows, plan
 from scripts.repair_link_labels import apply_rows as repair_labels
 from scripts.repair_link_labels import collect as collect_labels
 
-ROOT = Path(__file__).resolve().parents[1]
-MIGRATIONS = ROOT / "migrations"
 STAMP = "2026-09-24T00:00:00Z"
 
 
@@ -23,8 +20,7 @@ class RejectFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = Path(self.tmp.name).resolve() / "ledger.db"
-        upgrade(self.db, MIGRATIONS)
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.row_factory = sqlite3.Row
         self.addCleanup(self.con.close)

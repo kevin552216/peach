@@ -2,7 +2,7 @@
  *
  * 值不回显。服务端只报存在性，保存成功之后这一栏清空，看得到的只有字段名——凭据回到
  * 浏览器里就等于又多一处会被翻出来的副本。 */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { confirmModal } from '@peach/legacy/ui';
 
@@ -11,6 +11,7 @@ import { Chip } from '@/components/base/badges/chip';
 import { Input } from '@/components/base/input/input';
 
 import { errorMessage } from '../../api';
+import { rememberShape } from '../../configuration-skeleton';
 import { cardClass } from '../components/card';
 import { EmptyState } from '../components/empty-state';
 import { Note } from '../components/note';
@@ -26,7 +27,7 @@ import { SourceIcon } from './source-view';
 import { RiKey2Line } from '@remixicon/react';
 
 const CLEAR_BODY = '将清除这个来源在本机和共享副本中的登录凭据。';
-const WORLD_READABLE = '文件权限过宽。在运行 Peach 的 POSIX 主机上收紧为 0600。';
+const WORLD_READABLE = '其他系统用户可以读取此凭据文件。请在运行 Peach 的 Mac 或 Linux 电脑上，将文件权限设为仅当前用户可读写（0600）。';
 
 /** 一个字段此刻的样子：共享回填的、本机存过的，还是从来没填过。 */
 function fieldHint(row: CredentialRow, name: string): string {
@@ -86,19 +87,19 @@ function CredentialForm({ row, readOnly, toast }:
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" size="small" disabled={readOnly} {...busyProps(write.isPending)}
-          onClick={save}>保存配置</Button>
         {done ? (
-          <Button variant="danger" size="small" disabled={readOnly} {...busyProps(write.isPending)}
+          <Button variant="danger" disabled={readOnly} {...busyProps(write.isPending)}
             onClick={() => void confirmModal({
               title: '清除来源凭据', body: CLEAR_BODY, confirmLabel: '清除来源凭据', danger: true,
               onConfirm: () => write.mutateAsync({}),
             })}>清除</Button>
         ) : null}
+        <Button variant="primary" disabled={readOnly} {...busyProps(write.isPending)}
+          onClick={save}>保存配置</Button>
       </div>
       {problem ? <ErrorText>{problem}</ErrorText> : null}
       {(row.shared_fields || []).length
-        ? <Help>{`${row.shared_fields!.join('、')} 是从共享副本回填的，本机没有单独存。清除会把两边一起删。`}</Help>
+        ? <Help>{`${row.shared_fields!.join('、')} 使用共享副本中的登录信息，本机没有单独保存。清除时，本机和共享副本中的登录信息都会删除。`}</Help>
         : null}
       {row.path
         ? <Disclosure summary="凭据文件"><PathLine path={row.path} className="font-mono text-caption-1-regular text-text-tertiary" onRevealed={toast} /></Disclosure>
@@ -116,9 +117,8 @@ function CredentialSection({ row, readOnly, toast }:
       </span>
       <b className="min-w-0 text-body-medium wrap-anywhere text-text-primary">{row.provider_label}</b>
       <StateChip row={row} />
-      {row.missing.length
-        ? <Chip variant="caption" color="rose">{`缺 ${row.missing.join('、')}`}</Chip>
-        : null}
+      {/* 每个缺的字段一枚标签：缺两项就是两枚，填上一项消掉一枚。 */}
+      {row.missing.map(field => <Chip key={field} variant="caption" color="rose">{`缺 ${field}`}</Chip>)}
     </span>
   );
   if (row.requirement === 'none' || row.requirement === 'blocked') {
@@ -147,8 +147,10 @@ export function Credentials(
 ) {
   const rows = data.providers || [];
   const pending = rows.filter((row) => row.requirement === 'required' && !credentialDone(row));
+  /* 记下哪些来源已配好：配置页骨架据此画每行的徽章位与展开态（站点清单本身是静态登记）。 */
+  useEffect(() => { rememberShape('credentials', { done: rows.filter(credentialDone).map(row => row.provider) }) }, [data]);
   if (!rows.length) {
-    return <EmptyState shell="plain" icon={RiKey2Line} title="没有可配置的来源">已接入的站点及其凭据状态会显示在这里。</EmptyState>;
+    return <EmptyState size="compact" icon={RiKey2Line} title="没有可配置的来源">已接入的站点及其凭据状态会显示在这里。</EmptyState>;
   }
   const pendingLabel = pending.length ? <span className="text-body-2-regular text-text-error-primary">{`${pending.length} 个待配置`}</span> : null;
   const groups = <>{[
@@ -165,7 +167,9 @@ export function Credentials(
           </div>
         </section>
       ))}</>;
-  return embedded ? <Section title="来源凭据" aside={pendingLabel || undefined}><Stack>{groups}</Stack></Section> :
+  return embedded ? <Section title="来源凭据" aside={pendingLabel || undefined}>
+    <Stack><div className="flex flex-col gap-4">{groups}</div></Stack>
+  </Section> :
     <div className={cardClass({ padding: 'none', className: 'flex flex-col gap-4 px-6 py-5 max-sm:px-4' })}>
       <div className="flex flex-wrap items-center gap-2"><h3 className="mr-auto text-title-2-medium text-text-primary">来源凭据</h3>{pendingLabel}</div>
       {groups}

@@ -480,6 +480,16 @@ class RestartEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("未取得新托盘的启动准备记录", printed["message"])
 
+    def test_pending_readiness_is_reported_as_starting_not_failed(self):
+        self.startup = {"pid": 30, "ok": False, "steps": [
+            {"name": "readiness", "state": "pending", "message": "服务仍在启动"}]}
+        code, printed, _restart = self.run_entry(
+            [], windows_restart.RestartResult(True, "源码托盘已重启", new_tray_pid=30))
+        self.assertEqual(code, 1)
+        self.assertFalse(printed["ok"])
+        self.assertIn("仍在启动", printed["message"])
+        self.assertNotIn("准备失败", printed["message"])
+
     def test_the_entry_hands_the_package_to_swap_and_prints_the_outcome(self):
         entry = load_entry()
         finished = windows_restart.RestartResult(True, "重启完成", backup="C:/dist/backup.exe")

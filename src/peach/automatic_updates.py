@@ -26,7 +26,7 @@ class AutomaticUpdates:
                 raise ValueError("invalid settings")
             return data
         except FileNotFoundError:
-            return {"mode": "off", "interval_hours": 24}
+            return {"mode": "check", "interval_hours": 24}
         except (OSError, ValueError):
             return {"mode": "off", "interval_hours": 24, "error": "自动更新设置无法读取，请重新保存。"}
 

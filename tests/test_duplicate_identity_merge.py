@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from peach.migrations import upgrade
+from support.ledger import fresh_ledger
 from peach.review_csv import read_rows
 from scripts.merge_duplicate_identities import (
     apply_repeated_projections,
@@ -17,14 +17,11 @@ from scripts.merge_duplicate_identities import (
     run,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
-
 
 class DuplicateIdentityMergeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name) / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.executemany(
             "INSERT INTO asset(id,location,path,name,medium,creator) "
@@ -221,8 +218,7 @@ class ContainedAssetSetMergeTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name) / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.executemany(
             "INSERT INTO asset(id,location,path,name,medium,creator) "
@@ -285,8 +281,7 @@ class StageNameDuplicateTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name).resolve() / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.executemany(
             "INSERT INTO asset(id,location,path,name,medium,code) "
@@ -385,8 +380,7 @@ class DirectoryIdentityTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name).resolve() / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.executemany(
             "INSERT INTO asset(id,location,path,name,medium,code)"
@@ -473,8 +467,7 @@ class NamedPairTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name).resolve() / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.executemany(
             "INSERT INTO entity(id,kind,canonical_name,normalized_name,created_at,updated_at)"
@@ -572,8 +565,7 @@ class PairsOnlyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve()
-        self.db = self.root / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.root)
         self.con = sqlite3.connect(self.db)
         self.con.executemany(
             "INSERT INTO asset(id,location,path,name,medium,creator)"
@@ -648,8 +640,7 @@ class ScrapedPerformerProvenanceTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = Path(self.tmp.name).resolve() / "ledger.db"
-        upgrade(self.db, ROOT / "migrations")
+        self.db = fresh_ledger(self.tmp.name)
         self.con = sqlite3.connect(self.db)
         self.con.execute(
             "INSERT INTO asset(id,location,path,name,medium,creator)"

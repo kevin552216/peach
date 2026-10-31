@@ -108,6 +108,10 @@ class SourcePaused(RuntimeError):
     """来源冷却期内停止请求，保留已有图像。"""
 
 
+class SourceBudgetExhausted(SourcePaused):
+    """本趟采集预算耗尽，不能作为单个来源的冷却跳过。"""
+
+
 def cooldown_path(root: Path, source: str) -> Path:
     """这个来源的冷却记录。键是来源名；没有来源名的请求按主机名散列，见 `SourceTransport`。"""
     return Path(root) / ("scraping-" + source + ".cooldown.json")
@@ -418,7 +422,15 @@ class SourceTransport:
         for _ in range(7):
             from .processing_control import checkpoint
             checkpoint('network')
-            response = self._request(request, max(0, deadline - time.monotonic()), max_bytes)
+            from .processing_traffic import CURRENT, download_route
+            if CURRENT.get() is None:
+                response = self._request(request, max(0, deadline - time.monotonic()), max_bytes)
+            else:
+                source = source_for(request.url)
+                direct = bool(source and values_for(self.root, source).get('network') == 'direct')
+                options = {'trust_env': False} if direct else peach_proxy.client_options(self.root)
+                with download_route(bool(options.get('proxy') or options.get('trust_env', True))):
+                    response = self._request(request, max(0, deadline - time.monotonic()), max_bytes)
             # 作品页的 HTTP 404 缺少结构化身份依据，不能直接冻结成七天查无资料。
             if (response.status == 404 and request.method == 'GET'
                     and source_for(request.url) == 'fc2cmadb'
@@ -445,32 +457,32 @@ class SourceTransport:
         """闸门到顶的三句话都写「本趟」和「再跑一次接着采」：这三条按任务重新计数，
         读的人要据以决定的是「现在重跑一遍」，不是去查哪里还有配额。"""
         source = source_for(request.url)
+        if source == "javbus":
+            # 中文作品解析与连接检查共用语言偏好，封面请求也遵循来源策略。
+            headers = {key: value for key, value in request.headers.items() if key.lower() != "accept-language"}
+            request = HttpRequest(request.method, request.url,
+                                  {**headers, "Accept-Language": "zh-CN,zh;q=0.9"}, request.body)
         if self.max_requests and self.requests >= self.max_requests:
-            raise SourcePaused("本趟采集次数已用完，再跑一次接着采；已有图片保留")
+            raise SourceBudgetExhausted("本趟采集次数已用完，再跑一次接着采；已有图片保留")
         if self.deadline:
             timeout = min(timeout, self.deadline - time.monotonic())
             if timeout <= 0:
-                raise SourcePaused("本趟采集时间已用完，再跑一次接着采；已有图片保留")
+                raise SourceBudgetExhausted("本趟采集时间已用完，再跑一次接着采；已有图片保留")
         if self.max_bytes:
             remaining = self.max_bytes - self.bytes
             if remaining <= 0:
-                raise SourcePaused("本趟下载量已用完，再跑一次接着采；已有图片保留")
+                raise SourceBudgetExhausted("本趟下载量已用完，再跑一次接着采；已有图片保留")
             max_bytes = min(max_bytes, remaining - 1)
         key = source or hashlib.sha256(hostname_of(request.url).encode()).hexdigest()
         cooldown = cooldown_path(self.root, key)
         # 冷却只认这条路自己撞出来的账：直连 403 攒下的 `blocks` 与 `until` 不压到浏览器那条路上，反之亦然。
         via = self._via(source)
-        until, blocks = _state_for(self.root, key, via)
-        if until > time.time():
-            minutes = max(1, math.ceil((until - time.time()) / 60))
-            raise SourcePaused(f"来源正在冷却，约 {minutes} 分钟后可重试；本次未请求网站，已有图片保留")
+        blocks = self._check_cooldown(key, via)
         if source not in self.transports:
             self.transports[source] = self._transport_for(source)
         timeout = self.pacer.wait(key, timeout)
         # 等待期间另一任务可能触发整站冷却，发出请求前再次检查。
-        until, blocks = _state_for(self.root, key, via)
-        if until > time.time():
-            raise SourcePaused('来源正在冷却，本次未请求网站；已有图片保留')
+        blocks = self._check_cooldown(key, via)
         self.requests += 1
         try:
             response = self.transports[source](request, timeout, max_bytes)
@@ -517,6 +529,14 @@ class SourceTransport:
             cooldown.unlink(missing_ok=True)
         return response
 
+    def _check_cooldown(self, key, via):
+        """来源等待前后共用当前连接方式的冷却记录。"""
+        until, blocks = _state_for(self.root, key, via)
+        if until > time.time():
+            minutes = max(1, math.ceil((until - time.time()) / 60))
+            raise SourcePaused(f'来源正在冷却，约 {minutes} 分钟后可重试；本次未请求网站，已有图片保留')
+        return blocks
+
     def hold(self, source: str, action: str) -> None:
         """契约报的冷却细档（`SourceFailure.cooldown_action`）写回这个来源的冷却记录。
 
@@ -541,6 +561,8 @@ class SourceTransport:
         取到 200 且不是验证页：这个来源固定到浏览器（`fix_to_browser`），本趟之后的请求也走浏览器，返回这一页。
         本机没有浏览器、浏览器没取到或同样被拦：返回 None，调用方照 HTTP 客户端被拦那样冷却。
         """
+        from .processing_control import checkpoint
+        checkpoint('network')
         browser = self._browser_for(source)
         if browser is None:
             return None

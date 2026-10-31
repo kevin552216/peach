@@ -60,6 +60,8 @@ subjectAltName = ${SAN}
 keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 basicConstraints = critical, CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid, issuer
 CNF
 
 openssl req -new -newkey rsa:2048 -nodes \
@@ -83,4 +85,6 @@ echo "已用现有 CA 重签服务器证书（CA 未改动，已装的信任继�
 echo "  SAN: ${SAN}"
 openssl x509 -in "$TLS_DIR/peach.crt" -noout -serial -dates | sed 's/^/  /'
 echo "  重启服务后生效：python scripts/install_macos_agent.py install"
-[ -n "$LAN_IP" ] && echo "  注意：${LAN_IP} 是当前的局域网地址，换网络后需要重跑本脚本；peach.local 不受影响"
+if [ -n "$LAN_IP" ]; then
+    echo "  注意：${LAN_IP} 是当前的局域网地址，换网络后需要重跑本脚本；peach.local 不受影响"
+fi

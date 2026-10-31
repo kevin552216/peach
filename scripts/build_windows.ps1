@@ -1,17 +1,17 @@
 ﻿param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\dist\Peach'),
     [switch]$Standalone,
-    # 本机覆盖更新只编应用，沿用安装目录里的媒体工具。
-    [switch]$ApplicationOnly,
     # 在独立目录包之上再编一个 Inno Setup 安装包，放在输出目录的上一层。
     [switch]$Installer,
     [string]$CloudflaredPath = '',
     [string]$FFmpegPath = '',
-    [string]$UntruncPath = ''
+    [string]$UntruncPath = '',
+    # 发行构建：两项 Sentry DSN 必须齐全且合法，否则不产出安装包。
+    [switch]$RequireReporting
 )
 
 $ErrorActionPreference = 'Stop'
-if ($Installer -or $ApplicationOnly) { $Standalone = $true }
+if ($Installer) { $Standalone = $true }
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $Python)) {
@@ -37,9 +37,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'resources\peach.ico') 
     throw 'Brand assets are missing. Run scripts/generate_brand_assets.py first.'
 }
 
-if (Test-Path -LiteralPath (Join-Path $ProjectRoot 'resources\seed')) {
-    throw 'Private entity exports must stay outside the application resources directory.'
-}
+& $Python -X utf8 (Join-Path $ProjectRoot 'scripts/seed_pack.py') validate --pack (Join-Path $ProjectRoot 'resources\seed\entities.json')
+if ($LASTEXITCODE -ne 0) { throw 'Public entity seed validation failed.' }
 
 # Frontend bundles ship inside `--add-data web;web` and the runtime has no Node, so they
 # must be rebuilt here: web/dist is committed to Git, but packaging reads the working tree,
@@ -49,7 +48,7 @@ $Npm = Get-Command npm -ErrorAction SilentlyContinue
 if (-not $Npm) {
     throw 'npm not found. Frontend bundles must be rebuilt before packaging; install Node 24+.'
 }
-& $Npm.Source --prefix $FrontendPath ci
+& $Python -X utf8 (Join-Path $ProjectRoot 'scripts/npm_ci.py') --prefix $FrontendPath
 if ($LASTEXITCODE -ne 0) { throw 'npm ci failed in frontend/.' }
 & $Npm.Source --prefix $FrontendPath run build
 if ($LASTEXITCODE -ne 0) { throw 'Frontend bundle build failed (frontend/).' }
@@ -85,9 +84,10 @@ $BuildInfo = [ordered]@{
 }
 Set-Content -LiteralPath $BuildInfoPath -Value (ConvertTo-Json $BuildInfo) -Encoding utf8
 $SentryConfigPath = Join-Path $BuildPath 'sentry.json'
-Set-Content -LiteralPath $SentryConfigPath -Value (ConvertTo-Json @{
-    dsn = "$env:PEACH_SENTRY_DSN"; library_dsn = "$env:PEACH_LIBRARY_SENTRY_DSN"
-}) -Encoding utf8
+$ReportingArguments = @('--output', $SentryConfigPath)
+if ($RequireReporting) { $ReportingArguments += '--require' }
+& $Python -X utf8 (Join-Path $PSScriptRoot 'write_reporting_config.py') @ReportingArguments
+if ($LASTEXITCODE -ne 0) { throw 'Sentry reporting config is missing or invalid.' }
 
 $BuildMode = @('--onefile')
 $BuildDestination = $OutputPath
@@ -98,7 +98,7 @@ if ($Standalone) {
 $CloudflaredSource = $null
 $CloudflaredManifest = $null
 $CloudflaredHash = $null
-if ($Standalone -and -not $ApplicationOnly) {
+if ($Standalone) {
     if (-not $FFmpegPath) { $FFmpegPath = $env:PEACH_FFMPEG_BUILD }
     if (-not $FFmpegPath) { $FFmpegPath = Join-Path $ProjectRoot 'build\ffmpeg-windows\ffmpeg' }
     & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --source $FFmpegPath --validate-only
@@ -110,6 +110,13 @@ if ($Standalone -and -not $ApplicationOnly) {
     & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --tool untrunc --source $UntruncPath --validate-only
     if ($LASTEXITCODE -ne 0) {
         throw 'Standalone build requires verified untrunc and corresponding source. Run scripts/build_untrunc_windows.sh first or pass -UntruncPath.'
+    }
+    # 人脸模型在 PyInstaller 之前取齐并校验，网络不通时尽早失败；缓存在 build\face-models。
+    $FaceModelsStage = Join-Path $BuildPath 'face-models'
+    if (Test-Path -LiteralPath $FaceModelsStage) { Remove-Item -LiteralPath $FaceModelsStage -Recurse -Force }
+    & $Python -X utf8 (Join-Path $PSScriptRoot 'fetch_face_models.py') --destination $FaceModelsStage
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Standalone build requires verified face models. Check access to media.githubusercontent.com or fill build\face-models.'
     }
     $CloudflaredCandidates = @()
     if ($CloudflaredPath) { $CloudflaredCandidates += $CloudflaredPath }
@@ -130,7 +137,18 @@ if ($Standalone -and -not $ApplicationOnly) {
         throw "cloudflared SHA-256 mismatch: expected $($CloudflaredManifest.sha256), got $CloudflaredHash"
     }
 }
-& $Python -m PyInstaller --noconfirm --clean @BuildMode --windowed --name Peach `
+$ResourceArguments = @()
+$AmaneRuntime = Join-Path $BuildPath 'amane-runtime'
+& $Python -X utf8 (Join-Path $PSScriptRoot 'build_amane_runtime.py') --destination $AmaneRuntime `
+    --work (Join-Path $BuildPath 'amane-build')
+if ($LASTEXITCODE -ne 0) { throw 'amane runtime build or offline self-check failed.' }
+$ResourceArguments += @('--add-data', "${AmaneRuntime};tools/amane-runtime")
+$ResourceEntries = & $Python -X utf8 (Join-Path $ProjectRoot 'src/peach/bundle_resources.py') --root $ProjectRoot
+if ($LASTEXITCODE -ne 0) { throw 'Runtime resource manifest is incomplete.' }
+foreach ($ResourceEntry in $ResourceEntries) {
+    $ResourceArguments += @('--add-data', $ResourceEntry)
+}
+& $Python -m PyInstaller --noconfirm --clean @BuildMode @ResourceArguments --windowed --name Peach `
     --distpath $BuildDestination --workpath $WorkPath --specpath $BuildPath `
     --paths (Join-Path $ProjectRoot 'src') --python-option 'X utf8' `
     --collect-all curl_cffi --collect-all resvg_py `
@@ -139,12 +157,6 @@ if ($Standalone -and -not $ApplicationOnly) {
     --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto `
     --hidden-import uvicorn.lifespan.on `
     --icon (Join-Path $ProjectRoot 'resources\peach.ico') `
-    --add-data "$(Join-Path $ProjectRoot 'web');web" `
-    --add-data "$(Join-Path $ProjectRoot 'migrations');migrations" `
-    --add-data "$(Join-Path $ProjectRoot 'resources');resources" `
-    --add-data "$(Join-Path $ProjectRoot 'tools\amane-bridge\bridge.py');tools/amane-bridge" `
-    --add-data "$(Join-Path $ProjectRoot 'tools\amane-bridge\pyproject.toml');tools/amane-bridge" `
-    --add-data "$(Join-Path $ProjectRoot 'tools\amane-bridge\uv.lock');tools/amane-bridge" `
     --add-data "${BuildInfoPath};." `
     --add-data "${SentryConfigPath};." `
     (Join-Path $ProjectRoot 'scripts\build_app_entry.py')
@@ -152,25 +164,29 @@ if ($LASTEXITCODE -ne 0) { throw 'Peach build failed.' }
 if ($Standalone) {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'docs/TESTING_DESKTOP.md') -Destination (Join-Path $OutputPath '开始使用.md')
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'LICENSE') -Destination (Join-Path $OutputPath 'LICENSE.txt')
-    if (-not $ApplicationOnly) {
-        Copy-Item -LiteralPath $CloudflaredSource -Destination (Join-Path $OutputPath 'cloudflared.exe') -Force
-        $CloudflaredManifest | Add-Member -NotePropertyName packaged_sha256 -NotePropertyValue $CloudflaredHash -Force
-        $CloudflaredManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputPath 'cloudflared-manifest.json') -Encoding utf8
-        $PackagedFFmpeg = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\ffmpeg'))
-        if (-not $PackagedFFmpeg.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'FFmpeg packaging destination must stay inside the application output directory.'
-        }
-        if (Test-Path -LiteralPath $PackagedFFmpeg) { Remove-Item -LiteralPath $PackagedFFmpeg -Recurse -Force }
-        & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --source $FFmpegPath --destination $PackagedFFmpeg
-        if ($LASTEXITCODE -ne 0) { throw 'FFmpeg packaging failed.' }
-        $PackagedUntrunc = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\untrunc'))
-        if (-not $PackagedUntrunc.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'untrunc packaging destination must stay inside the application output directory.'
-        }
-        if (Test-Path -LiteralPath $PackagedUntrunc) { Remove-Item -LiteralPath $PackagedUntrunc -Recurse -Force }
-        & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --tool untrunc --source $UntruncPath --destination $PackagedUntrunc
-        if ($LASTEXITCODE -ne 0) { throw 'untrunc packaging failed.' }
+    Copy-Item -LiteralPath $CloudflaredSource -Destination (Join-Path $OutputPath 'cloudflared.exe') -Force
+    $CloudflaredManifest | Add-Member -NotePropertyName packaged_sha256 -NotePropertyValue $CloudflaredHash -Force
+    $CloudflaredManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputPath 'cloudflared-manifest.json') -Encoding utf8
+    $PackagedFFmpeg = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\ffmpeg'))
+    if (-not $PackagedFFmpeg.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'FFmpeg packaging destination must stay inside the application output directory.'
     }
+    if (Test-Path -LiteralPath $PackagedFFmpeg) { Remove-Item -LiteralPath $PackagedFFmpeg -Recurse -Force }
+    & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --source $FFmpegPath --destination $PackagedFFmpeg
+    if ($LASTEXITCODE -ne 0) { throw 'FFmpeg packaging failed.' }
+    $PackagedUntrunc = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\untrunc'))
+    if (-not $PackagedUntrunc.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'untrunc packaging destination must stay inside the application output directory.'
+    }
+    if (Test-Path -LiteralPath $PackagedUntrunc) { Remove-Item -LiteralPath $PackagedUntrunc -Recurse -Force }
+    & $Python -X utf8 (Join-Path $PSScriptRoot 'media_tool_bundle.py') --tool untrunc --source $UntruncPath --destination $PackagedUntrunc
+    if ($LASTEXITCODE -ne 0) { throw 'untrunc packaging failed.' }
+    $PackagedFaceModels = [IO.Path]::GetFullPath((Join-Path $OutputPath 'tools\face-models'))
+    if (-not $PackagedFaceModels.StartsWith($OutputPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Face model packaging destination must stay inside the application output directory.'
+    }
+    if (Test-Path -LiteralPath $PackagedFaceModels) { Remove-Item -LiteralPath $PackagedFaceModels -Recurse -Force }
+    Copy-Item -LiteralPath $FaceModelsStage -Destination $PackagedFaceModels -Recurse
 }
 
 # 工作目录只服务这一次构建：`--clean` 已让下一次不复用它，留着只是几十 MB 的中间产物。

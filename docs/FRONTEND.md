@@ -6,7 +6,7 @@
 2. 新增 React 页面：按 [迁移下一个页面](#迁移下一个页面) 接入路由树。
 3. 查询模块职责：看 [目录与产物](#目录与产物) 和 [挂载契约](#挂载契约)。
 
-Peach 按 [ADR-0031](adr/0031-frontend-react-boardui-tailwind.md) 接入 React + Tailwind + BoardUI。主界面由 `frontend/src/react/bootstrap.tsx` 启动 `Application`，应用域控制器负责骨架、容器和页面助手，React 路由树负责客户端导航、页面与详情内容。主界面只有 `peach-app.js` 与 `peach-app.css` 两份产物，控制器与组件引用同一源码图。
+Peach 按 [ADR-0031](adr/0031-frontend-react-boardui-tailwind.md) 接入 React + Tailwind + BoardUI。主界面由 `frontend/src/react/bootstrap.tsx` 启动 `Application`，应用域控制器负责骨架、容器和页面助手，React 路由树负责客户端导航、页面与详情内容。主界面的入口是 `peach-app.js` 与 `peach-app.css`，低频页面按路由拆成带内容哈希的 chunk（[ADR-0118](adr/0118-main-bundle-route-chunks.md)），控制器与组件引用同一源码图。
 
 只有一条不可变的约束：**运行时没有 Node**。Python 服务、PyInstaller 包和 macOS 上的
 检出都直接读 `web/`，所以构建产物提交进 Git，不用任何 CDN。
@@ -34,7 +34,8 @@ Peach 按 [ADR-0031](adr/0031-frontend-react-boardui-tailwind.md) 接入 React +
 | `frontend/src/react/components/` | Peach 自己的组合件（说明条、进度、空态、等待点），BoardUI 注册表里没有对应条目的那些 |
 | `frontend/src/react/taste/` | 口味页：`taste.ts` 是契约与几何算法，`charts.tsx` 是雷达／名次条／热力／桑基，`taste-page.tsx` 是整页 |
 | `frontend/test/` | vitest 用例与遗留模块的桩；`test/react/` 直接挂组件，`*-routes.test.tsx` 走路由树的开收契约 |
-| `web/dist/peach-app.js`、`peach-app.css` | 主界面构建产物，**进 Git**，固定文件名，由 `web/index.html` 引用；服务端通过 `/dist/{name}` 提供 |
+| `web/dist/peach-app.js`、`peach-app.css` | 主界面入口，**进 Git**，固定文件名，由 `web/index.html` 引用；服务端通过 `/dist/{name}` 提供，ETag 复验 |
+| `web/dist/peach-app.<名字>-<哈希>.js` | 低频页面的 chunk，**进 Git**，由入口动态导入；服务端只认这一种形态，按长期不变缓存。每次构建先删上一批，提交时连同删除一起暂存 |
 | `web/dist/peach-pages.js`、`peach-pages.css` | 首启、登录与错误页的独立构建产物，**进 Git**，固定文件名。主包构建后追加构建（`emptyOutDir: false`）；只有这两份产物允许免登录读取 |
 
 首次运行页（未配置时的 `GET /`）、登录页（`GET /login`）与浏览器导航撞上的错误页是 SPA
@@ -74,7 +75,7 @@ Peach 按 [ADR-0031](adr/0031-frontend-react-boardui-tailwind.md) 接入 React +
 - 结构：一条窄列里排「通用 / 媒体 / 下载 / 网络与访问 / 维护」五组，每组一个 `h2.ui-configgroup` 小标题，没有内容的组连标题一起省略。页面自己画顶上那排页签（`.ui-board-local-nav`，`role="tablist"`，方向键与 Home／End 在整排里走），一组一格，一次只显示选中的那一组；页签条和整页同一次提交画出，第一帧就在。
 - 数据契约是 `/api/configuration`（`src/peach/routes_configuration.py`）。端点字符串只在 `frontend/src/configuration-endpoints.ts` 声明一次，整页和设置弹层的摘要卡读同一个 `queryKey`。
 - 第一帧必须同步：壳挂完这一页紧接着按地址里的 `#peachProxy` 滚到那一块，所以路由树用 `flushSync` 画第一帧，往后的更新照常异步。`.ui-configpage` 的第一层依次是页签条、各组的小标题与面板；每组的根节点就是那一格 `role="tabpanel"`，选中的那一组带 `ui-board-group-active`。
-- 跳到某一组：别处（统计页「添加媒体目录」、空库提示、媒体库选单「管理媒体库」、诊断页）把组名记进壳单例 `configurationRequestedSection`（路由树里的页面经 `actions.requestConfigurationSection`），壳打开这一页时作为 `open.section` 交进去、页面画上之后清空；页面只拿它定第一帧选中哪一格。
+- 跳到某一组：React 页面（统计页「添加媒体」、诊断页、关注管理的凭据入口）直接链到这一组的地址 `/settings/<组>`，页面按地址定第一帧选中哪一格；遗留层的空库提示与媒体库选单「管理媒体库」把组名记进壳单例 `configurationRequestedSection`，壳打开这一页时作为 `open.section` 交进去、页面画上之后清空。
 - 设置弹层「这台电脑」一格只挂 `configuration-summary`（`configuration-summary.tsx`）：媒体库数、端口、更新状态和「打开配置页」，不放可编辑的控件（ADR-0050）。媒体库数取 `/api/configuration` 的 `library_count`，由服务端按 `media_libraries.libraries` 分组数好，页面不自己归并。
 - 相邻的两处不在这页：媒体修复是数据管理页 React 子树里的一张卡（`frontend/src/react/media-repair/`），订阅源是关注管理页的「订阅源」页签（`follow-manage/feed-sources.tsx`，读 `/api/feeds`）。
 - 服务端检查部署方式和请求来源：桌面服务由托盘管理且请求来自本机；Docker 服务由容器入口管理，允许经过登录验证的本机或私有网络请求，拒绝携带代理转发头的管理请求。`/healthz` 按调用方返回 `configurable`，页面据此显示配置入口；入口隐藏不能替代服务端访问检查。
@@ -126,6 +127,13 @@ Peach 按 [ADR-0031](adr/0031-frontend-react-boardui-tailwind.md) 接入 React +
 - 垃圾文件队列（`/junk-files`，`frontend/src/react/junk-queue/`）不是这张网格，是 `CATALOG_ROUTES` 的另一页，同样画进 `#grid`：打开前不取数，画上就铺自己那份骨架；换分类、换视图与处置后重读经 `updateManagedRoute` 推进来。它与目录网格换页时先由 `clearCatalogGrid` 收，计数行里归它的那一格随之同步撤掉，壳再往 `#count` 铺骨架。
 - `entity` 由资料页正文 `entity-body`（`frontend/src/react/entity-body/`）直接渲染在它的作品视图里，不另挂岛：第一页随资料页首屏一起取来，续页由资料页按查询键取。同一块的另两个视图是名册（索引页的 `PeopleGrid`）与照片墙（样张分段在前、本地图片在后；直接打开 React 灯箱（`photo-lightbox/`），定位源文件调 `actions.revealSource`）。
 - `items` 挂在 `#nrow` 上：壳手上已有那一批，岛只画卡。
+- 馆藏表格由 `catalog-list-page.tsx` 渲染，默认依次显示名称、时长、分辨率、体积、星级评分和观看次数。「显示列」可开启番号、高潮计数、观看时间、入库时间和发行时间；全部列按身份、媒体规格、个人记录、时间信息排列。隐藏某列仍可按该字段排序。名称过长时省略显示，悬停可查看全文。拖动表头分隔线调整列宽；键盘操作时聚焦分隔线，按 Enter 进入调整，再用左右方向键改变宽度，按 Enter 或 Tab 结束。列宽与显示选择保存在当前浏览器；「重置列宽」恢复默认宽度，「恢复默认显示」恢复默认列。桌面和手机均在表格内横向滚动，不扩大页面宽度。
+- 表格的表头和行分隔线铺满外框，右侧余量由独立空白列承接，保存的列宽保持不变。鼠标按住非控件区域可左右拖动所有数据表格，滚轮维持浏览器行为。馆藏表格只在手动开启多选后显示勾选框，底部「取消」清空选择并退出多选。评分与详情页共用 `RatingStars`：点击星星保存，再点当前星级取消；保存失败时在原单元格显示原因和「立即重试」（无障碍名称「立即重试评分」），成功回执提供撤销。
+- 所有数据表格共用 `TableColumnControls`、`useTablePreferences` 和 `DataTableFrame`，提供显示列、恢复默认显示、重置列宽及鼠标／键盘调整列宽。各表单独保存浏览器偏好；身份列与勾选列保留，其余列可隐藏，排序菜单继续列出可排序字段。馆藏、关注来源、JAV 订阅源、两张别名表和数据管理表均使用这套组件。
+- 关注来源与 JAV 订阅源的表头提供「全选本页」，再次点击取消本页选择。表格链接只占文字或图标本身的范围；管理表空白处用于选择行。关注卡片每条来源的站点图标放在行首，JAV 订阅源站点复用缓存的 `SiteLabel` 图标。
+- 已保存别名的「修改统一名称」打开改名对话框，可输入名称或直接选用已有别名。`POST /api/follow/author-alias` 接受 `action: "rename"`、`canonical_key` 和 `canonical`；原名称保留为别名，关联的创作者名称及作品创作者字段在同一事务中同步。名称冲突或关联多个创作者档案时返回错误并回滚。
+- 外置按钮控制的正文使用 `CollapseRegion`，原生详情使用 `Disclosure`；两者共用 `ui-kit/collapse.ts` 的高度过渡和反向点击保护。关注卡片、任务通知、教程及侧栏保留正文状态，箭头使用同一元素旋转；详情标题箭头共用 `CollapseChevron`。减少动态效果时遵守全站设置。
+- 排序方向共用 `IconSwap` 的双图标结构与 `--motion-swap`，覆盖数据表、关注管理及实体／关注页排序；键盘操作即时更新。换批按钮保持同一枚 shuffle SVG，等待时继承共享描线参数；首页、实体和关注浮层共用这套忙态。JAV 详情的标题和元信息通过 `data-reveal-line` 接入 Stage 既有逐行揭示与清理。
 - 版式、选中态与快进秒数经 `updateManagedRoute`（资料页作品区经 `pushEntityPage`）推进来：换版式只重画，已载入的分页原样保留。`selected` 每次推一个新的 `Set`。
 - 卡上的悬停预览、封面取景与图片微光都在 `frontend/src/card-art/`：卡片直接调 `wireHover`／`releaseHover`（状态写在卡的 `data-previewing`／`data-longhover` 上）与 `relayoutCovers`，微光由 `installCardArt` 装的监听按 `PENDING_IMAGES` 认 `[data-media-art]>img`；壳只经 `configureHoverPreview` 告诉悬停预览多选态、打码与延迟。卡片的结构钩子全是 `data-media-*`；悬停预览插进封面格的 `video.hv`、`img.ui-hvframes` 与封套 `img.poster` 用自己的类名；`.ui-hvframes` 的样式在同目录的 `card-art.css`，另两样在 `12-cards.css`。
 - 离场：去目录、回收站与垃圾文件以外的页面时由 `clearCatalogGrid` 收 `#grid` 那一页（`claimSurface` 只收 `#stats` 与 `#index`）；资料页正文随资料页由 `releaseManagedRoute` 收起；接着看是作品详情里的子组件，随舞台的内容一起卸。
@@ -269,8 +277,8 @@ Detailed 加上 class 与附近文字；Forensic 再加上带 id 的完整 DOM �
 npm --prefix frontend run build:agentation   # 在要用它的那份检出里构建一次
 ```
 
-然后在页面地址后加 `?agentation=on`（关闭用 `?agentation=off`），开关存在这台设备的
-`localStorage` 里，之后每次开页都会带上右下角的工具栏。
+然后在页面地址后加 `?agentation=on`，仅在当前页面加载标注工具。刷新或重新打开页面时不会
+自动加载；`?agentation=off` 也可用于关闭。浏览器中的持久开启标记在页面初始化时清理。
 
 - 产物写到 `build/agentation/peach-agentation.js`，由 `/dev/agentation.js` 提供，口令同 `/dist/`。
   它不进 Git、不进独立包：Agentation 是 PolyForm Shield 许可，只许自用，不随 Peach 分发，
@@ -510,7 +518,7 @@ vendor 到 `web/vendor/` 的四个包（video.js、swiper、lucide-static、heal
 | `@types/react`、`@types/react-dom` | React 子树的类型检查 |
 | `agentation` | 本机开发用的界面标注工具栏，单独构建、不进产物与独立包（见「界面标注」） |
 
-主界面由 `vite.config.ts` 从 `src/react/bootstrap.tsx` 构建为 `peach-app.js` 与 `peach-app.css`。Application、路由树、常驻组件与共享状态同属一份源码图，`@peach/*` 直接解析到源码，不外置 React、Query、历史、shell 或 UI 模块。主界面不做代码分割；开发取证工具 `/dev/agentation.js` 是独立的按需外部模块。
+主界面由 `vite.config.ts` 从 `src/react/bootstrap.tsx` 构建为 `peach-app.js` 与 `peach-app.css`。Application、路由树、常驻组件与共享状态同属一份源码图，`@peach/*` 直接解析到源码，不外置 React、Query、历史、shell 或 UI 模块。路由表里的低频页面经 `src/react/router/route-chunk.ts` 的 `routeChunk(() => import(...))` 拆出：首屏取数阶段与接口并行装载，取齐后同步画页，首屏稳定后空闲时预热；首屏用得到的模块由 `codeSplitting.groups` 的 `$initial` 收回入口，chunk 从 `./peach-app.js` 导入它们。新增低频页照这个写法接进路由表；`page()` 只在 `preload()` 落地后调用，组件测试直接读 `page()` 时先等 `loadRouteChunks()`。样式仍合成一份 `peach-app.css`，低频页模块带的样式排在首屏样式之后。开发取证工具 `/dev/agentation.js` 是独立的按需外部模块。
 
 `npm run build` 先构建主界面并清空 `web/dist/`，再用 `vite.pages.config.ts` 追加独立页面包。浏览器基线是 Chrome 111、Firefox 128、Safari 16.4，oklch 原样输出；随主题变化的值用 `.dark` 与自定义属性，不写 `light-dark()`，由 `react-color-scheme.test.ts` 检查产物。
 

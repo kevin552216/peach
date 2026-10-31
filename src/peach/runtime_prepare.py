@@ -54,7 +54,7 @@ Run = Callable[..., subprocess.CompletedProcess]
 
 @dataclass(frozen=True)
 class Step:
-    """一步准备的结果。`state` 取 skipped / current / stale / synced / applied / failed。"""
+    """一步准备的结果。`state` 取 skipped / pending / current / stale / synced / applied / failed。"""
 
     name: str
     state: str
@@ -188,6 +188,14 @@ def ledger_writer(*, replication_enabled: bool, db: Path, shared_db: Path,
     return True, "本机是写入端"
 
 
+def configured_ledger_writer(config) -> tuple[bool, str]:
+    """按当前配置定位本机与共享账本，并只读核对写入角色。"""
+    database = config.directory('database') / 'ledger.db'
+    shared = config.shared_root / 'database' / 'ledger.db'
+    return ledger_writer(replication_enabled=bool(config.replication.enabled), db=database,
+                         shared_db=shared, state_dir=config.directory('state'))
+
+
 class Migrations:
     """用 venv 的 `peach migrate` 子进程把账本迁到当前结构。"""
 
@@ -249,7 +257,7 @@ def record(state_dir: Path, steps: Iterable[Step], *, pid: int | None = None) ->
     payload = {
         "pid": os.getpid() if pid is None else pid,
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "ok": not any(step.problem for step in items),
+        "ok": not any(step.problem or step.state == "pending" for step in items),
         "steps": [asdict(step) for step in items],
     }
     directory = Path(state_dir)

@@ -18,12 +18,14 @@ import { RiDeleteBinLine } from '@remixicon/react';
 import { SettingsRow } from '@/components/application/settings/settings-rows';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
-import { Select, SelectItem } from '@/components/base/select/select';
+import { Select, SelectItem } from '../components/select';
 import { Switch } from '@/components/base/switch/switch';
+import { StatusLabel } from '../components/status-label';
 
 import { apiSend, errorMessage } from '../../api';
 import type { PushDiscoveryPrefix, PushDiscoveryState } from '../bundle';
 import { CodeBlock } from '../components/code-block';
+import { Note } from '../components/note';
 import { Disclosure, ErrorText, FieldLabel, Footer, Help, Rows, Section, Stack } from './section';
 import { busyProps, useAction } from './use-action';
 
@@ -70,15 +72,20 @@ export function PushDiscoveryForm({ initial, receipt }: {
   };
 
   const ingested = `已入库 ${live.queue.ingested} 个文件`
+    + (live.queue.failed ? `，${live.queue.failed} 个入库失败` : '')
     + (live.queue.pending ? `，队列里还有 ${live.queue.pending} 条` : '');
   const watching = live.local_running
     ? `正在监视 ${live.local_roots.join('、')}` : live.local_message || '没有运行';
 
   return (
-    <Section title="推送发现" onSubmit={submit}>
+    <Section id="pushDiscovery" title="自动发现新文件" onSubmit={submit}>
+      <Stack>
+        <div className="flex flex-wrap items-center gap-2"><span className="text-body-regular text-text-secondary">本机监视</span>
+          <StatusLabel tone={!live.enabled || !live.watch_local ? 'neutral' : live.local_running ? 'progress' : 'warning'}>{!live.enabled || !live.watch_local ? '未启用' : live.local_running ? '运行中' : '未运行'}</StatusLabel></div>
+      </Stack>
       <Rows>
-        <SettingsRow label="新文件落地就入库" description={live.enabled ? ingested : undefined}>
-          <Switch aria-label="新文件落地就入库" isSelected={state.enabled} isDisabled={!state.available}
+        <SettingsRow label="发现新文件后自动入库" description={live.enabled ? ingested : undefined}>
+          <Switch aria-label="发现新文件后自动入库" isSelected={state.enabled} isDisabled={!state.available}
             onChange={(enabled) => setState({ ...state, enabled })} />
         </SettingsRow>
         <SettingsRow label="监视本机文件夹" description={live.enabled && live.watch_local ? watching : undefined}>
@@ -96,10 +103,17 @@ export function PushDiscoveryForm({ initial, receipt }: {
             ? '贴进 CloudDrive2「设置 → Webhooks」，需要会员；更换密钥后要重贴。'
             : live.origin
               ? '还没有共享密钥，保存配置后生成。'
-              : '要先有 CloudDrive2 能访问的 HTTPS 地址才能生成。'}>
+              : '要先有 CloudDrive2 能访问的局域网地址才能生成。'}>
           </SettingsRow>
         ) : null}
       </Rows>
+      {/* 原因是服务端记下的最近一次入库异常，下一个文件入库成功时清空；漏掉的那个文件由
+          定期全量扫描补上，所以这里只报原因，不给重试。 */}
+      {live.enabled && live.queue.last_error ? (
+        <Stack divided>
+          <Note tone="error" title="最近一次入库失败">{live.queue.last_error}</Note>
+        </Stack>
+      ) : null}
       {live.enabled && live.cloud && live.config_toml ? (
         <Stack divided>
           <div className="flex flex-col gap-3">
@@ -124,7 +138,7 @@ export function PushDiscoveryForm({ initial, receipt }: {
                   <Input className="min-w-0 flex-1" aria-label={`云端路径前缀 ${index + 1}`}
                     placeholder="/115" autoComplete="off" maxLength={200} value={row.prefix}
                     onChange={(prefix) => edit(index, { prefix })} />
-                  <Select aria-label={`前缀 ${index + 1} 对应的媒体根`} selectedKey={row.root}
+                  <Select aria-label={`前缀 ${index + 1} 对应的媒体根`} prefix="对应目录" selectedKey={row.root}
                     onSelectionChange={(key) => { if (key !== null) edit(index, { root: String(key) }); }}>
                     {roots.map((root) => <SelectItem key={root} id={root}>{root}</SelectItem>)}
                   </Select>
@@ -134,7 +148,7 @@ export function PushDiscoveryForm({ initial, receipt }: {
               ))}
             </div>
             <div>
-              <Button variant="secondary" size="small"
+              <Button variant="secondary"
                 onClick={() => setRows((list) => [...list, { prefix: '', root: roots[0] ?? '' }])}>
                 添加前缀
               </Button>

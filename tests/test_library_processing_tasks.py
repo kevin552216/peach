@@ -126,6 +126,8 @@ class SelectedProcessingTests(unittest.TestCase):
         destination = self.config.directory('generated') / 'snapshots' / 'local' / 'existing.jpg'
         destination.parent.mkdir(parents=True)
         Image.new('RGB', (120, 80), 'white').save(destination)
+        from peach.artifact_rules import remember
+        remember(destination)
         with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute('UPDATE asset SET snapshot_path=?', (str(destination),))
         with patch('peach.frame_capture.capture_with_retry') as capture, \

@@ -7,12 +7,13 @@ import { Switch } from '@/components/base/switch/switch';
 
 import { apiGet, apiSend } from '../../api';
 import { CodeBlock } from '../components/code-block';
+import { StatusLabel } from '../components/status-label';
 import { Disclosure, ErrorText, Footer, Help, Rows, Stack } from './section';
 import { busyProps, useAction } from './use-action';
 
 export interface LibrarySharingState {
   enabled: boolean; available: boolean; schema: number; fields: string[]; notice: string;
-  last_attempt?: { period?: string; status?: string; reason?: string };
+  last_attempt?: { period?: string; status?: string; reason?: string; attempted?: boolean };
 }
 interface Preview { data: { library: unknown[]; preferences: unknown; coverage: { uncoded_items: number } }; bytes: number; token: string; schema: number }
 
@@ -46,9 +47,14 @@ export function LibrarySharingSettings({ initial, receipt }: {
         onChange={(enabled) => enabled ? setReviewing(true) : save(false)}
         {...busyProps(action.busy === 'save')} />
     </SettingsRow></Rows>
-    {!value.available ? <Stack divided><Help>上传服务未配置。</Help></Stack> : null}
+    {!value.available ? <Stack divided><span className="self-start"><StatusLabel>上传服务未配置</StatusLabel></span></Stack> : null}
     {value.enabled && value.last_attempt?.status === 'failed'
-      ? <Stack divided><ErrorText>馆藏与口味上传失败，自动重试。</ErrorText></Stack> : null}
+      ? <Stack divided><span className="self-start"><StatusLabel tone={value.last_attempt.attempted ? 'error' : 'warning'}>{value.last_attempt.attempted ? '上传失败' : '待重新准备'}</StatusLabel></span><ErrorText>{value.last_attempt.attempted
+        ? '馆藏与口味上传失败，本周不再发送。' : '馆藏与口味上传未完成，将自动重新准备。'}</ErrorText></Stack> : null}
+    {value.enabled && value.last_attempt?.status === 'waiting-data'
+      ? <Stack divided><span className="self-start"><StatusLabel>等待数据</StatusLabel></span><Help>等待可分析的馆藏或偏好数据。</Help></Stack> : null}
+    {value.enabled && value.last_attempt?.status === 'unknown'
+      ? <Stack divided><span className="self-start"><StatusLabel tone="warning">结果未取得</StatusLabel></span><Help>未取得上传结果，本周不再发送。</Help></Stack> : null}
     {preview ? <Stack divided>
       <Help>当前预览包含 {preview.data.library.length} 部有编号作品、{preview.data.coverage.uncoded_items} 条无编号馆藏的汇总，约 {(preview.bytes / 1024).toFixed(1)} KiB。不含账号、设备、文件路径和浏览器历史记录等个人数据。</Help>
       <Disclosure summary="上传数据预览" defaultOpen>
@@ -60,15 +66,15 @@ export function LibrarySharingSettings({ initial, receipt }: {
     </Stack> : null}
     {action.error ? <Stack divided><ErrorText>{action.error}</ErrorText></Stack> : null}
     <Footer>
+      {reviewing && !value.enabled ? <Button variant="secondary" onClick={() => {
+        setReviewing(false); setPreview(null); setAccepted(false);
+      }}>取消</Button> : null}
       <Button variant="secondary" onClick={() => { setReviewing(true); void action.run('preview',
         (signal) => apiGet<Preview>('/api/configuration/library-sharing/preview', signal),
         (data) => { setPreview(data); setAccepted(false) }) }}
         {...busyProps(action.busy === 'preview')}>预览上传内容</Button>
-      {!value.enabled && preview ? <Button disabled={!accepted} onClick={() => save(true)}
+      {!value.enabled && preview ? <Button variant="primary" disabled={!accepted} onClick={() => save(true)}
         {...busyProps(action.busy === 'save')}>同意并开启上传</Button> : null}
-      {reviewing && !value.enabled ? <Button variant="secondary" onClick={() => {
-        setReviewing(false); setPreview(null); setAccepted(false);
-      }}>取消</Button> : null}
     </Footer>
   </>;
 }

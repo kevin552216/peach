@@ -52,7 +52,8 @@ def plan(config, *, delete_data: bool, program: Path | None = None) -> dict:
             raise ValueError("卸载目录与媒体目录重叠，请手动检查")
     files: list[Path] = []
     if delete_data:
-        generated = [config.path.resolve(), root / "config.previous.toml", root / "config.pending.toml"]
+        generated = [config.path.resolve(), root / "config.previous.toml", root / "config.pending.toml",
+                     root / "config.pre-media-identity.toml"]
         generated.extend(_generated_backups(root))
         files = sorted(set(generated), key=lambda path: os.path.normcase(str(path)))
     return {"program": str(target), "data_root": str(root), "directories": [str(p) for p in directories],

@@ -5,6 +5,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import call, patch
@@ -90,6 +91,211 @@ class FetchRetryTests(unittest.TestCase):
                 covers.best_cover(lambda *args: _Response(503, b''), 'MIDA-085', 0, diagnostics=diagnostics)
         self.assertNotIsInstance(raised.exception, covers.NotFound)
         self.assertGreater(diagnostics.get('source_http_503', 0), 0)
+
+    def test_dmm_transport_failures_allow_other_official_candidates(self):
+        cached = covers.candidate_for('https://official.example/cached.jpg')
+        live = covers.candidate_for('https://official.example/live.jpg')
+        for error in (covers.httpx.ConnectError('TLS EOF'), covers.httpx.ReadTimeout('read timeout')):
+            for candidates in ((cached,), ()):
+                with self.subTest(error=type(error).__name__, cached=bool(candidates)):
+                    diagnostics = {}
+                    with patch.object(covers, 'dmm_evidence', side_effect=error), \
+                            patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence((live,))) as mirror:
+                        winner, size, _ = covers.best_cover(
+                            transport_for({cached.url: (200, jpeg(800, 540)), live.url: (200, jpeg(1600, 1080))}),
+                            'SSIS-057', 0, prior_candidates=candidates, diagnostics=diagnostics)
+                    mirror.assert_called_once()
+                    self.assertEqual((winner, size), (live, (1600, 1080)))
+                    self.assertGreater(diagnostics.get('source_unanswered', 0), 0)
+
+    def test_catalog_failure_keeps_a_usable_cached_candidate(self):
+        cached = covers.candidate_for('https://official.example/cached.jpg')
+        with patch.object(covers, 'dmm_evidence', side_effect=covers.httpx.ConnectError('TLS EOF')), \
+                patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence()):
+            winner, size, _ = covers.best_cover(transport_for({cached.url: (200, jpeg(800, 540))}),
+                                                'SSIS-057', 0, prior_candidates=(cached,))
+        self.assertEqual((winner, size), (cached, (800, 540)))
+
+    def test_paused_catalogs_keep_an_already_available_candidate(self):
+        candidate = covers.candidate_for('https://official.example/cached.jpg')
+        for site, code in (('r18_evidence', 'SSIS-057'), ('mgstage_images', '200GANA-1995'),
+                           ('prestige_images', 'ABW-192')):
+            with self.subTest(site=site), \
+                    patch.object(covers, 'dmm_evidence', return_value=covers.MetadataEvidence()), \
+                    patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence()), \
+                    patch.object(covers, 'mgstage_images', return_value=[]), \
+                    patch.object(covers, 'prestige_images', return_value=[]), \
+                    patch.object(covers, site, side_effect=covers.SourcePaused('来源正在冷却')):
+                winner, size, _ = covers.best_cover(
+                    transport_for({candidate.url: (200, jpeg(800, 540))}), code, 0,
+                    prior_candidates=(candidate,))
+                self.assertEqual((winner, size), (candidate, (800, 540)))
+
+    def test_a_paused_group_site_does_not_hide_the_other_sites_candidate(self):
+        candidate = covers.candidate_for('https://official.example/live.jpg')
+        for paused, available in (('prestige_images', 'mgstage_images'),
+                                   ('mgstage_images', 'prestige_images')):
+            with self.subTest(paused=paused), \
+                    patch.object(covers, paused, side_effect=covers.SourcePaused('来源正在冷却')), \
+                    patch.object(covers, available, return_value=[candidate]):
+                winner, _, _ = covers.best_cover(
+                    transport_for({candidate.url: (200, jpeg(1600, 1080))}), 'ABW-192', 0)
+                self.assertEqual(winner, candidate)
+
+    def test_a_persisted_cooldown_keeps_the_cached_candidate_and_cooldown_record(self):
+        from peach.http import HttpResponse
+        from peach.scraping_access import SourceTransport, cooldown_path, pause_source
+        candidate = covers.candidate_for('https://available.example/cover.jpg')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            pause_source(root, 'prestige', retry_after=60)
+            cooldown = cooldown_path(root, 'prestige')
+            before = cooldown.read_bytes()
+            transport = SourceTransport(root)
+            for site in ('mgstage', 'r18dev'):
+                transport.transports[site] = lambda *_args: HttpResponse(404, {}, b'')
+            transport.transports[None] = lambda *_args: HttpResponse(200, {}, jpeg(800, 540))
+            with patch('peach.scraping_access.client_for') as client:
+                winner, _, _ = covers.best_cover(transport, 'ABW-192', 0, prior_candidates=(candidate,))
+            self.assertEqual(winner, candidate)
+            self.assertEqual(cooldown.read_bytes(), before)
+            client.assert_not_called()
+
+    def test_a_paused_image_probe_or_download_keeps_other_candidates(self):
+        paused = covers.candidate_for('https://paused.example/cover.jpg')
+        available = covers.candidate_for('https://available.example/cover.jpg')
+        for phase in ('probe', 'download'):
+            def transport(request, _timeout, _limit, phase=phase):
+                if request.url == paused.url:
+                    if phase == 'probe' or 'Range' not in request.headers:
+                        raise covers.SourcePaused('来源正在冷却')
+                    return _Response(200, jpeg(1600, 1080))
+                return _Response(200, jpeg(800, 540))
+            with self.subTest(phase=phase):
+                winner, _, _ = covers.best_cover(transport, 'FC2-PPV-123456', 0,
+                                                 prior_candidates=(paused, available))
+                self.assertEqual(winner, available)
+
+    def test_unanswered_images_preserve_paused_and_other_failure_results(self):
+        first = covers.candidate_for('https://paused.example/cover.jpg')
+        second = covers.candidate_for('https://offline.example/cover.jpg')
+        for all_paused in (False, True):
+            def transport(request, _timeout, _limit, all_paused=all_paused):
+                if request.url == first.url or all_paused:
+                    raise covers.SourcePaused('来源正在冷却')
+                return _Response(503, b'')
+            expected = covers.SourcePaused if all_paused else covers.Unavailable
+            with self.subTest(all_paused=all_paused):
+                with self.assertRaises(expected) as caught:
+                    covers.best_cover(transport, 'FC2-PPV-123456', 0, prior_candidates=(first, second))
+                self.assertNotIsInstance(caught.exception, covers.NotFound)
+
+    def test_catalogs_that_are_all_paused_remain_paused_not_missing(self):
+        def transport(*_args):
+            raise covers.SourcePaused('来源正在冷却')
+        for code in ('SSIS-057', '200GANA-1995', 'ABW-192'):
+            with self.subTest(code=code), self.assertRaises(covers.SourcePaused):
+                covers.best_cover(transport, code, 0)
+
+    def test_a_spent_run_budget_stops_before_trying_another_candidate(self):
+        from peach.scraping_access import SourceTransport
+        candidates = tuple(covers.candidate_for(f'https://{name}.example/cover.jpg')
+                           for name in ('first', 'second'))
+        with tempfile.TemporaryDirectory() as directory:
+            transports = [SourceTransport(Path(directory), max_requests=1),
+                          SourceTransport(Path(directory), max_bytes=1),
+                          SourceTransport(Path(directory), max_seconds=1)]
+            transports[0].requests = transports[1].bytes = 1
+            transports[2].deadline = time.monotonic() - 1
+            for transport in transports:
+                for code in ('FC2-PPV-123456', 'ABW-192', 'SSIS-057'):
+                    with self.subTest(transport=transport, code=code), \
+                            patch('peach.scraping_access.client_for') as client:
+                        with self.assertRaises(covers.SourcePaused) as caught:
+                            covers.best_cover(transport, code, 0, prior_candidates=candidates)
+                        self.assertIn('本趟', str(caught.exception))
+                        self.assertEqual(covers.failure_log_row(code, caught.exception)['outcome'], 'unavailable')
+                        client.assert_not_called()
+
+    def test_image_checks_preserve_cancellation_and_deadline_exceptions(self):
+        from peach.processing_control import ItemSkipped
+        candidate = covers.candidate_for('https://official.example/full.jpg')
+        for error in (InterruptedError('处理任务已停止'), ItemSkipped('跳过当前项'),
+                      covers.DeadlineExceeded('动作预算已用尽')):
+            for phase in ('probe', 'download'):
+                def transport(request, _timeout, _limit, phase=phase, error=error):
+                    if phase == 'download' and 'Range' in request.headers:
+                        return _Response(200, jpeg(800, 540))
+                    raise error
+                with self.subTest(error=type(error).__name__, phase=phase):
+                    with self.assertRaises(type(error)) as caught:
+                        covers.best_cover(transport, 'FC2-PPV-123456', 0, prior_candidates=(candidate,))
+                    self.assertIs(caught.exception, error)
+
+    def test_unanswered_catalogs_without_candidates_are_retryable(self):
+        diagnostics = {}
+        with patch.object(covers, 'dmm_evidence', side_effect=covers.httpx.ConnectError('TLS EOF')), \
+                patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence()):
+            with self.assertRaises(covers.Unavailable) as caught:
+                covers.best_cover(transport_for({}), 'SSIS-057', 0, diagnostics=diagnostics)
+        self.assertNotIsInstance(caught.exception, covers.NotFound)
+        self.assertGreater(diagnostics.get('source_unanswered', 0), 0)
+
+    def test_unanswered_catalogs_with_rejected_candidates_are_retryable(self):
+        candidate = covers.candidate_for('https://official.example/missing.jpg')
+        for status in (403, 429, 503):
+            with self.subTest(status=status), \
+                    patch.object(covers, 'dmm_evidence', side_effect=covers.Unavailable(f'HTTP {status}')), \
+                    patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence()):
+                with self.assertRaises(covers.Unavailable) as caught:
+                    covers.best_cover(transport_for({}), 'SSIS-057', 0, prior_candidates=(candidate,))
+                self.assertNotIsInstance(caught.exception, covers.NotFound)
+
+    def test_unanswered_catalogs_with_only_animated_candidates_are_retryable(self):
+        candidate = covers.candidate_for('https://official.example/moving.gif')
+        frames = [Image.new('RGB', (800, 450), color) for color in ('red', 'blue')]
+        buffer = io.BytesIO()
+        frames[0].save(buffer, format='GIF', save_all=True, append_images=frames[1:])
+        with patch.object(covers, 'dmm_evidence', side_effect=covers.Unavailable('HTTP 503')), \
+                patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence()):
+            with self.assertRaises(covers.Unavailable) as caught:
+                covers.best_cover(transport_for({candidate.url: (200, buffer.getvalue())}), 'SSIS-057', 0,
+                                  prior_candidates=(candidate,))
+        self.assertNotIsInstance(caught.exception, covers.NotFound)
+
+    def test_unanswered_image_probes_and_animated_candidates_are_retryable(self):
+        moving = covers.candidate_for('https://official.example/moving.gif')
+        offline = covers.candidate_for('https://official.example/offline.jpg')
+        frames = [Image.new('RGB', (800, 450), color) for color in ('red', 'blue')]
+        buffer = io.BytesIO()
+        frames[0].save(buffer, format='GIF', save_all=True, append_images=frames[1:])
+
+        def probe(_transport, candidate, **_options):
+            if candidate == offline:
+                raise covers.httpx.ConnectError('TLS EOF')
+            return (800, 450)
+
+        with patch.object(covers, 'probe_size', side_effect=probe):
+            with self.assertRaises(covers.Unavailable) as caught:
+                covers.best_cover(transport_for({moving.url: (200, buffer.getvalue())}), 'FC2-PPV-123456', 0,
+                                  prior_candidates=(moving, offline))
+        self.assertNotIsInstance(caught.exception, covers.NotFound)
+
+    def test_answered_catalogs_and_missing_candidates_are_definitive(self):
+        candidate = covers.candidate_for('https://official.example/missing.jpg')
+        with patch.object(covers, 'dmm_evidence', return_value=covers.MetadataEvidence()), \
+                patch.object(covers, 'r18_evidence', return_value=covers.MetadataEvidence()):
+            with self.assertRaises(covers.NotFound):
+                covers.best_cover(transport_for({}), 'SSIS-057', 0, prior_candidates=(candidate,))
+
+    def test_catalog_deadlines_and_programming_errors_propagate(self):
+        for error in (covers.DeadlineExceeded('deadline'), ValueError('invalid catalog state')):
+            with self.subTest(error=type(error).__name__), \
+                    patch.object(covers, 'dmm_evidence', side_effect=error), \
+                    patch.object(covers, 'r18_evidence') as mirror:
+                with self.assertRaises(type(error)):
+                    covers.best_cover(transport_for({}), 'SSIS-057', 0)
+                mirror.assert_not_called()
 
     def test_official_catalog_probe_preserves_source_cooldown_writes(self):
         from unittest.mock import Mock
@@ -873,10 +1079,41 @@ class SettledMissTests(unittest.TestCase):
 
     def test_a_confirmed_absence_is_not_retried(self):
         self._log([{"code": "HEYZO-1380", "result": "未取得",
-                    "note": "所有渠道都没有候选"},
+                    "note": "所有渠道都没有候选", "outcome": "not_found",
+                    "catalog_rules": covers.upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES},
                    {"code": "ABW-220", "result": "未取得",
-                    "note": "候选都不是可用封套"}])
+                    "note": "候选都不是可用封套", "outcome": "not_found",
+                    "catalog_rules": covers.upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES}])
         self.assertEqual(covers.settled_misses(self.log), {"HEYZO-1380", "ABW-220"})
+
+    def test_catalog_absence_logs_use_the_current_rules_and_preserve_fc2_memories(self):
+        self._log([{'code': 'SSIS-057', 'result': '未取得', 'note': 'NotFound: 所有渠道都没有候选'},
+                   {'code': 'SSIS-058', 'result': '未取得', 'outcome': 'not_found', 'catalog_rules': 0},
+                   {'code': 'FC2-PPV-1', 'result': '未取得', 'note': 'NotFound: 所有渠道都没有候选'},
+                   {'code': 'FC2-PPV-2', 'result': '未取得', 'note': 'Unavailable: 官方封面地址都没有取到图片'},
+                   {'code': 'FC2-PPV-3', 'result': '未取得', 'outcome': 'unavailable'}])
+        before = self.log.read_bytes()
+        self.assertEqual(covers.settled_misses(self.log), {'FC2-PPV-1'})
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_unanswered_catalogs_are_not_settled_misses(self):
+        self._log([{'code': 'SSIS-057', 'result': '未取得', 'note': 'Unavailable: 官方目录查询未完成',
+                    'outcome': 'unavailable', 'catalog_rules': covers.upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES}])
+        self.assertEqual(covers.settled_misses(self.log), set())
+
+    def test_legacy_csv_headers_keep_successes_and_fc2_absences_readable(self):
+        with self.log.open('w', encoding='utf-8-sig', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=('code', 'result', 'source', 'url', 'note'))
+            writer.writeheader()
+            writer.writerows([
+                {'code': 'SSIS-057', 'result': '未取得', 'note': 'NotFound: 所有渠道都没有候选'},
+                {'code': 'FC2-PPV-1', 'result': '未取得', 'note': 'NotFound: 所有渠道都没有候选'},
+                {'code': 'SSIS-058', 'result': '取得', 'source': 'official.example', 'url': 'https://official.example/cover.jpg'},
+            ])
+        before = self.log.read_bytes()
+        self.assertEqual(covers.settled_misses(self.log), {'FC2-PPV-1'})
+        self.assertEqual(covers.logged_rows(self.log)[2]['source'], 'official.example')
+        self.assertEqual(self.log.read_bytes(), before)
 
     def test_a_transport_failure_is_always_retried(self):
         """一次超时不等于确认没有，不能靠它把番号永久踢出队列。"""
@@ -1048,6 +1285,34 @@ class PendingCoverTests(unittest.TestCase):
 
 
 class UpgradeExistingTests(unittest.TestCase):
+    def test_batch_logs_distinguish_unanswered_catalogs_from_confirmed_absence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            database, output, log = root / 'ledger.db', root / 'covers', root / 'covers.csv'
+            connection = sqlite3.connect(database)
+            connection.execute('CREATE TABLE asset(code TEXT, medium TEXT, location TEXT)')
+            connection.executemany('INSERT INTO asset VALUES(?,?,?)',
+                                   [('AAA-001', 'video', '115'), ('BBB-002', 'video', '115')])
+            connection.commit()
+            connection.close()
+            args = covers.build_parser().parse_args([
+                '--db', str(database), '--out', str(output), '--log', str(log), '--delay', '0', '--min-free', '0'])
+
+            def unavailable_or_missing(_transport, code, *_args, **_options):
+                if code == 'AAA-001':
+                    raise covers.Unavailable('官方目录查询未完成')
+                raise covers.NotFound('所有渠道都没有候选')
+
+            with patch.object(covers, 'HttpxTransport'), \
+                    patch.object(covers, 'best_cover', side_effect=unavailable_or_missing), \
+                    patch.object(covers, 'system_volume', return_value=root), \
+                    patch.object(covers.DiskGuard, 'check', return_value=100.0):
+                self.assertEqual(covers.run(args), 0)
+            rows = {row['code']: row for row in covers.logged_rows(log)}
+            self.assertEqual(rows['AAA-001']['outcome'], 'unavailable')
+            self.assertEqual(rows['BBB-002']['outcome'], 'not_found')
+            self.assertEqual(covers.settled_misses(log), {'BBB-002'})
+
     def test_only_a_larger_candidate_replaces_the_cover_and_success_log(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

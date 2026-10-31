@@ -13,7 +13,6 @@ from pathlib import Path
 from filelock import FileLock
 
 from . import library_processing as engine
-from .filename_rules import Engine, load as load_filename_rules
 from .jobs import DiskGuard, JobPaused
 from .media_processing_policy import metadata_only
 from .processing_control import (ProcessingStopped, bind_control, checkpoint, initial_estimate,
@@ -25,6 +24,17 @@ TASKS = ('scan', 'probe', 'metadata', 'covers', 'previews')
 LABELS = dict(scan='扫描文件', probe='读取媒体属性', metadata='采集缺失资料', covers='补全封面', previews='生成视频预览')
 DEFAULTS = dict(all=TASKS, collect=TASKS[1:], scan=('scan',),
                 metadata=('metadata', 'covers'), previews=('previews',), probe=('probe',), covers=('covers',))
+
+
+def requested_selection(config, stage, tasks, asset_ids, execution_mode, defer_suspected_duplicates,
+                        metadata_fields, incremental):
+    """每趟独立工作表与增量同步使用各自的范围契约。"""
+    if (tasks is None and execution_mode == 'sequential' and metadata_fields is None
+            and stage not in ('probe', 'covers')):
+        return None
+    if incremental:
+        raise ValueError('自选工作项请使用整库或所选影片范围')
+    return selection_for(config, stage, tasks, asset_ids, execution_mode, defer_suspected_duplicates)
 
 
 def selection_for(config, stage, tasks, asset_ids, execution_mode='sequential', defer_suspected_duplicates=False):
@@ -90,14 +100,13 @@ class SelectedProcessing:
         self.errors = []
         self.rows, self.roots = [], []
         self.covered = []
-        rules = Engine(load_filename_rules(config.directory('state')))
-        self.directory_index = engine._DirectoryIndex(rules.code, rules.fingerprint)
+        self.directory_index = engine._DirectoryIndex()
         self.locations = config.locations if options.get('location', 'configured') == 'configured' else {
             options['location']: config.locations[options['location']]}
         self.state = self.initial_state()
         previous = options.get('resume_state') or {}
         engine._restore_processing_counts(self.state, previous)
-        self.checkpoints = engine._LibraryCheckpoints(self.state, previous, self.database)
+        self.checkpoints = engine._LibraryCheckpoints(self.state, previous, self.database, self.db)
         self.log = engine._processing_issue_log(config, self.path, self.identity,
             options.get('state_file') is not None, resume=bool(previous))
         self.state['issues_log'] = str(self.log)
@@ -402,6 +411,8 @@ class SelectedProcessing:
         engine._read_local_posters(jobs, self.state, update=self.update, issue=self.issue)
         for index, row in enumerate(rows):
             self.update(stage='补全封面', checked=index, total=len(rows))
+            if 'cover' not in engine._library_stages(self.config)(row['path']):
+                continue
             code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             _, covers = self.get_remote().collect(row, code, [], self.cover_root, update=self.update, issue=self.issue)
             self.covered.append((row['id'], covers))
@@ -556,6 +567,8 @@ class MetadataWork:
     def collect(self, prepared):
         runner = self.runner
         row, code, fields, entries, verify_existing, local_ok = prepared
+        if 'metadata' not in engine._library_stages(runner.config)(row['path']):
+            return
         issues = runner.state['work_progress']['metadata']['failed']
         missing = self.selection.wanted(row, fields, verify_existing, database=runner.database, code=code)
         found, _ = self.selection.collect(runner.get_remote(), row, code, missing, runner.cover_root,

@@ -17,6 +17,7 @@ import {
 } from '@peach/appearance';
 
 import { GlowPresetGrid } from '../components/glow-preset-grid';
+import { useOverlayScrollbar } from '../components/overlay-scrollbar';
 import type { SettingsPanelHost } from './settings-panel-api';
 import { Icon } from './icon';
 import { DialRow } from './legacy-controls';
@@ -34,13 +35,14 @@ function StopRow({ host, spot, index, glow }: { host: SettingsPanelHost; spot: S
   const row = useRef<HTMLDivElement | null>(null);
   const toggle = useRef<HTMLButtonElement | null>(null);
   const pop = useRef<HTMLDivElement | null>(null);
+  const palette = useOverlayScrollbar<HTMLDivElement>();
   const [family, setFamily] = useState('all');
   /* 弹层左右贴齐这一行：宽度不跟着行走的话，一张比行窄的色板看不出是从哪一行开出来的。
      这条要排在 wireAnchoredMenu 之前，它按当前宽度算左缘。 */
   useLayoutEffect(() => {
     const [mount, button, menu] = [row.current, toggle.current, pop.current];
     if (!mount || !button || !menu) return;
-    button.addEventListener('click', () => { menu.style.width = `${mount.getBoundingClientRect().width}px` });
+    button.addEventListener('click', () => { menu.style.width = `${button.offsetWidth}px` });
     wireAnchoredMenu(mount, button, menu);
   }, []);
   const color = glow[spot].color;
@@ -67,13 +69,15 @@ function StopRow({ host, spot, index, glow }: { host: SettingsPanelHost; spot: S
               onClick={() => setFamily(key)}>{name}</button>
           ))}
         </div>
-        <div data-glow-palette="" role="radiogroup" aria-label={`${label}颜色`}>
+        <div data-glow-palette-frame="">
+        <div ref={palette} data-glow-palette="" role="radiogroup" aria-label={`${label}颜色`}>
           {GLOW_SWATCHES.map(([swatchFamily, name, hex]) => (
             <button type="button" key={hex} role="radio" aria-checked={hex === color} data-glow-swatch={hex}
               data-glow-family={swatchFamily} style={{ '--glow-swatch': hex } as CSSProperties}
               title={name} aria-label={name} hidden={family !== 'all' && swatchFamily !== family}
               onClick={() => pick(hex)} />
           ))}
+        </div>
         </div>
       </div>
     </div>
@@ -85,7 +89,8 @@ export function GlowSettings({ host }: { host: SettingsPanelHost }) {
   const native = isNativeGlass(glow.preset);
   return (
     <section data-glow-setting="" id="homeGlowControls" aria-label="侧栏光晕参数" hidden={!glow.on}>
-      <section data-glow-group=""><h4>配色</h4>
+      <section data-glow-group=""><h4 data-settings-subheading="">光晕配色</h4>
+        <div data-setting-card="" data-glow-card="">
         <p data-glow-current="">当前配色<b data-glow-preset-name="">{glowPresetName(glow.preset)}</b></p>
         <GlowPresetGrid store={host.store} label="光晕配色" />
         <p data-glow-native-note="" hidden={!native}>这一档用每块玻璃自带的反光，颜色跟着明暗主题走。</p>
@@ -98,16 +103,17 @@ export function GlowSettings({ host }: { host: SettingsPanelHost }) {
               onSettle={() => { host.store.save(); if (field === 'speed') host.changed('glow') }} />
           ))}
         </div>
-      </section>
-      <section data-glow-group="" data-glow-colours="" hidden={native}><h4>颜色</h4>
-        <div data-glow-stops="">
-          {HOME_GLOW_SPOTS.map((spot, index) => <StopRow key={spot} host={host} spot={spot as Spot} index={index} glow={glow} />)}
+        <div data-glow-actions="">
+          <button type="button" className="geist-button" data-glow-reset=""
+            onClick={() => { host.store.value.homeGlow = normalizeHomeGlow(null); host.store.save(); host.changed('glow') }}>恢复默认</button>
+        </div>
         </div>
       </section>
-      <div data-glow-actions="">
-        <button type="button" className="geist-button" data-glow-reset=""
-          onClick={() => { host.store.value.homeGlow = normalizeHomeGlow(null); host.store.save(); host.changed('glow') }}>恢复默认</button>
-      </div>
+      <section data-glow-group="" data-glow-colours="" hidden={native}><h4 data-settings-subheading="">自定义颜色</h4>
+        <div data-setting-card="" data-glow-colour-card=""><div data-glow-stops="">
+          {HOME_GLOW_SPOTS.map((spot, index) => <StopRow key={spot} host={host} spot={spot as Spot} index={index} glow={glow} />)}
+        </div></div>
+      </section>
     </section>
   );
 }

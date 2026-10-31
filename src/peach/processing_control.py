@@ -15,6 +15,31 @@ from .fsutil import atomic_write_text
 CURRENT = ContextVar('peach_library_processing_control', default=None)
 _CONTROLS = {}
 _LOCK = threading.Lock()
+
+
+class ItemSkipped(InterruptedError):
+    """当前资产由用户跳过，任务继续处理下一项。"""
+
+
+@contextmanager
+def processing_item(asset_id):
+    control = CURRENT.get()
+    if control is None:
+        yield
+        return
+    with control.lock:
+        control.current_asset_id = asset_id
+    try:
+        control.check_item()
+        yield
+        control.check_item()
+    finally:
+        with control.lock:
+            control.refresh(force=True)
+            control.current_asset_id = None
+            if control.skip_asset_id == asset_id:
+                control.skip_asset_id = None
+                control._save()
 MODES = ('low', 'standard', 'high')
 
 
@@ -26,8 +51,9 @@ IO_INTERVALS = {
 }
 
 
-class ProcessingStopped(InterruptedError):
-    """用户要求在安全停点结束这一趟处理。"""
+from .jobs import JobCancelled
+
+ProcessingStopped = JobCancelled
 
 
 def valid_mode(value):
@@ -70,8 +96,8 @@ def checkpoint_values(values):
 
 
 def interrupted_state(control):
-    if control is not None and control.stopped:
-        return dict(status='cancelled', stage='已停止', error='', completed_at=time.time(), followups=[])
+    if control is not None and control.cancelled:
+        return dict(status='cancelled', outcome='cancelled', stage='已停止', error='')
     return dict(status='paused', error='', completed_at=None) if control is not None and control.paused else {}
 
 
@@ -116,6 +142,7 @@ class ActiveDeadline(float):
         return result
 
     def effective(self):
+        self.control.check_item()
         return float(self) + self.control.paused_seconds - self.paused
 
     def __sub__(self, other):
@@ -148,6 +175,10 @@ def deadline_after(seconds):
 
 
 class ProcessingControl:
+    @property
+    def stopped(self):
+        return self.cancelled
+
     def __init__(self, path):
         self.path = path
         self.lock = threading.RLock()
@@ -155,7 +186,7 @@ class ProcessingControl:
         self.mode = data.get('speed_mode') if data.get('speed_mode') in MODES else 'standard'
         self.job_id = data.get('job_id')
         self.paused = data.get('paused') is True
-        self.stopped = data.get('stopped') is True
+        self.cancelled = data.get('cancelled') is True or data.get('stopped') is True
         self.event = threading.Event()
         self.event.set()
         self.publish = None
@@ -165,6 +196,8 @@ class ProcessingControl:
         self.paused_seconds = 0.0
         self.pause_started = None
         self.reloaded_at = 0.0
+        self.current_asset_id = None
+        self.skip_asset_id = data.get('skip_asset_id')
 
     def refresh(self, force=False):
         with self.lock:
@@ -176,7 +209,8 @@ class ProcessingControl:
             if data.get('job_id') == self.job_id or self.publish is None:
                 self.job_id = data.get('job_id', self.job_id)
                 self.paused = data.get('paused', self.paused)
-                self.stopped = data.get('stopped', self.stopped)
+                self.cancelled = data.get('cancelled', data.get('stopped', self.cancelled))
+                self.skip_asset_id = data.get('skip_asset_id')
                 mode = data.get('speed_mode', self.mode)
                 if mode in MODES and self.mode != mode:
                     self.mode = mode
@@ -184,7 +218,25 @@ class ProcessingControl:
 
     def _save(self):
         atomic_write_text(self.path, json.dumps(dict(
-            speed_mode=self.mode, job_id=self.job_id, paused=self.paused, stopped=self.stopped)) + '\n')
+            speed_mode=self.mode, job_id=self.job_id, paused=self.paused, cancelled=self.cancelled,
+            skip_asset_id=self.skip_asset_id)) + '\n')
+
+    def skip_current(self, job_id, asset_id):
+        with self.lock:
+            self.refresh(force=True)
+            if self.job_id != job_id:
+                raise ValueError('任务已变化，请刷新页面后重试')
+            self.skip_asset_id = asset_id
+            self._save()
+            self.event.set()
+
+    def check_item(self):
+        self.refresh()
+        if self.cancelled:
+            from .jobs import JobCancelled
+            raise JobCancelled('用户停止任务')
+        if self.current_asset_id is not None and self.skip_asset_id == self.current_asset_id:
+            raise ItemSkipped('已跳过当前影片')
 
     def request(self, action, job_id=None, mode=None):
         with self.lock:
@@ -193,9 +245,10 @@ class ProcessingControl:
             if action == 'set_speed':
                 self.mode = valid_mode(mode)
                 self.next_work.clear()
-            elif action == 'stop':
-                self.stopped, self.paused = True, False
-            elif self.stopped:
+            elif action in ('cancel', 'stop'):
+                self.cancelled = True
+                self.paused = False
+            elif self.cancelled:
                 raise ValueError('任务已停止，请重新发起任务')
             else:
                 self.paused = action == 'pause'
@@ -207,8 +260,8 @@ class ProcessingControl:
         with self.lock:
             if self.job_id != job_id:
                 self.job_id, self.paused, self.paused_seconds = job_id, False, 0.0
-                self.stopped = False
-                self.pause_started = None
+                self.cancelled = False
+                self.skip_asset_id = None
 
     @contextmanager
     def bind(self, job_id, *, publish, active, db_path, mode=None):
@@ -231,8 +284,7 @@ class ProcessingControl:
         started = None
         while True:
             self.refresh()
-            if self.stopped:
-                raise ProcessingStopped('用户停止任务')
+            self.check_item()
             check_pause(self.db_path)
             if not self.active():
                 raise InterruptedError('处理任务已停止')
@@ -274,7 +326,11 @@ def user_paused(db_path, job_id):
 def user_stopped(db_path, job_id):
     from .update_tasks import state_for
     data = _read(state_for(db_path).parent / 'library-processing-control.json')
-    return data.get('job_id') == job_id and data.get('stopped') is True
+    return bool(job_id) and data.get('job_id') == job_id and (data.get('stopped') is True or data.get('cancelled') is True)
+
+
+def user_cancelled(db_path, job_id):
+    return user_stopped(db_path, job_id)
 
 
 def initial_estimate(config, db_path, stage, asset_ids=None, mode=None, *, tasks=None):

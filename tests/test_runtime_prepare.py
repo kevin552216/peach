@@ -262,6 +262,13 @@ class RecordTests(unittest.TestCase):
             written = record(Path(directory), [Step("dependencies", "stale", "不一致")], pid=1)
             self.assertFalse(written["ok"])
 
+    def test_pending_readiness_is_incomplete_without_being_a_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            step = Step("readiness", "pending", "服务仍在启动")
+            written = record(Path(directory), [step], pid=1)
+            self.assertFalse(written["ok"])
+            self.assertFalse(step.problem)
+
 
 class TaskGateTests(unittest.TestCase):
     HOST = "peach-win"

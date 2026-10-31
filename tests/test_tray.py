@@ -1388,6 +1388,45 @@ class ServiceRevivalTests(unittest.TestCase):
             self.assertEqual(len(handed), 2)
             self.assertTrue(all(handle.closed for handle in handed))
 
+    def test_an_owned_live_child_starts_until_its_first_response_then_uses_health(self):
+        process = Mock()
+        process.poll.return_value = None
+        get = Mock(side_effect=OSError("not listening"))
+        with tempfile.TemporaryDirectory() as directory:
+            manager = ServiceManager((self.SPEC,), popen=Mock(return_value=process),
+                                     log_dir=Path(directory), health_get=get)
+            with patch("peach.tray.assign_to_job"), patch("peach.tray.create_kill_on_close_job"):
+                manager.start_missing()
+                manager.start_missing()
+            manager._popen.assert_called_once()
+            self.assertTrue(manager.waiting_for_startup())
+            self.assertEqual(manager.status_summary(), "启动中")
+            self.assertIn("HTTPS 启动中", manager.status_details())
+            get.side_effect = None
+            get.return_value = ReadyResponse(200, {"ok": True})
+            self.assertTrue(manager.healthy(self.SPEC))
+            get.side_effect = OSError("lost listener")
+            self.assertFalse(manager.healthy(self.SPEC))
+            self.assertFalse(manager.waiting_for_startup())
+            self.assertIn("异常", manager.status())
+
+    def test_an_exited_child_or_an_error_response_is_not_starting(self):
+        process = Mock()
+        process.poll.return_value = None
+        get = Mock(side_effect=OSError("not listening"))
+        with tempfile.TemporaryDirectory() as directory:
+            manager = ServiceManager((self.SPEC,), popen=Mock(return_value=process),
+                                     log_dir=Path(directory), health_get=get)
+            with patch("peach.tray.assign_to_job"), patch("peach.tray.create_kill_on_close_job"):
+                manager.start_missing()
+            process.poll.return_value = 1
+            self.assertFalse(manager.waiting_for_startup())
+            process.poll.return_value = None
+            get.side_effect = None
+            get.return_value = ReadyResponse(503, {"ok": False})
+            self.assertFalse(manager.healthy(self.SPEC))
+            self.assertFalse(manager.waiting_for_startup())
+
 
 class TrayLogFileTests(unittest.TestCase):
     def test_the_file_keeps_tray_events_and_drops_per_probe_http_noise(self):
@@ -1471,6 +1510,7 @@ class TrayPreparationTests(unittest.TestCase):
         manager.specs = ()
         manager.start_missing.side_effect = lambda: self.events.append("start")
         manager.wait_until_ready.return_value = ready
+        manager.waiting_for_startup.return_value = False
         manager.readiness_problems.return_value = list(problems)
 
         def restart(prepare=None):
@@ -1526,6 +1566,100 @@ class TrayPreparationTests(unittest.TestCase):
         self.assertIn("database is locked", tray._startup_warning)
         self.assertIn("数据库结构与迁移不一致", tray._startup_warning)
         self.assertFalse(runtime_prepare.read_record(self.root / "state", pid=os.getpid())["ok"])
+
+    def test_late_readiness_completes_the_record_and_opens_the_browser_once(self):
+        manager = self.manager(ready=False)
+        manager.specs = (ServiceRevivalTests.SPEC,)
+        manager.waiting_for_startup.return_value = True
+        manager.healthy.return_value = True
+        tray = self.tray(manager, self.preparation())
+        tray.show_browser = True
+        self.run_tray(tray)
+        record = runtime_prepare.read_record(self.root / "state", pid=os.getpid())
+        self.assertFalse(record["ok"])
+        self.assertEqual(record["steps"][-1]["state"], "pending")
+        self.assertIsNone(tray._startup_warning)
+        tray.gate.open.assert_not_called()
+        tray.gate.poll.return_value = False
+        for _ in range(2):
+            ServiceRevivalTests.one_health_round(self, tray)
+        self.assertTrue(runtime_prepare.read_record(self.root / "state", pid=os.getpid())["ok"])
+        tray.gate.open.assert_called_once_with()
+        manager.start_missing.assert_called_once_with()
+
+    def test_first_setup_opens_after_late_readiness_unless_silent(self):
+        for silent in (False, True):
+            with self.subTest(silent=silent):
+                manager = self.manager(ready=False)
+                manager.waiting_for_startup.return_value = True
+                manager.healthy.return_value = True
+                tray = self.tray(manager, self.preparation())
+                tray.gate.waiting = True
+                tray.gate.poll.return_value = False
+                tray.silent = silent
+                self.run_tray(tray)
+                ServiceRevivalTests.one_health_round(self, tray)
+                self.assertEqual(tray.gate.open.call_count, int(not silent))
+
+    def test_a_pending_child_that_exits_records_failure_before_revival(self):
+        manager = self.manager(ready=False)
+        manager.waiting_for_startup.return_value = True
+        manager.specs = (ServiceRevivalTests.SPEC,)
+        manager.healthy.return_value = False
+        tray = self.tray(manager, self.preparation())
+        self.run_tray(tray)
+        manager.waiting_for_startup.return_value = False
+        tray.gate.poll.return_value = False
+        ServiceRevivalTests.one_health_round(self, tray)
+        record = runtime_prepare.read_record(self.root / "state", pid=os.getpid())
+        self.assertFalse(record["ok"])
+        self.assertEqual(record["steps"][-1]["state"], "failed")
+        self.assertIsNone(tray._pending_startup)
+        tray.icon.notify.assert_called_once()
+        tray.gate.open.assert_not_called()
+
+    def test_restarting_a_slow_service_records_pending_without_a_failure_notice(self):
+        manager = self.manager(ready=False)
+        manager.waiting_for_startup.return_value = True
+        tray = self.tray(manager, self.preparation())
+        icon = self.press_restart(tray)
+        self.assertIn("仍在启动", icon.notify.call_args.args[0])
+        self.assertNotIn("未能", icon.notify.call_args.args[0])
+        self.assertFalse(runtime_prepare.read_record(self.root / "state", pid=os.getpid())["ok"])
+
+    def test_source_sync_completes_only_its_ready_pending_update_on_a_later_health_round(self):
+        for outcome in ("ready", "exited", "schema", "newer"):
+            with self.subTest(outcome=outcome):
+                manager = self.manager(ready=False)
+                manager.specs = (ServiceRevivalTests.SPEC,)
+                manager.waiting_for_startup.return_value = True
+                tray = self.tray(manager, self.preparation())
+                tray.versions.state = "updated"
+                tray.windows_updates = FakeUpdates(WindowsUpdatePreparation("services", "测试通过。"))
+                tray.gate.poll.return_value = False
+                icon = Mock()
+                tray.sync_source(icon)
+                LocalRebuildTests.drain(self, tray)
+                message = icon.notify.call_args.args[0]
+                self.assertIn("仍在启动", message)
+                self.assertNotIn("未能恢复", message)
+                self.assertIsNotNone(tray.windows_updates.pending())
+                manager.waiting_for_startup.return_value = False
+                manager.healthy.return_value = outcome != "exited"
+                if outcome == "schema":
+                    manager.readiness_problems.return_value = ["HTTPS 未就绪：数据库结构与迁移不一致"]
+                if outcome == "newer":
+                    tray.windows_updates.mark_pending("next-commit", ())
+                ServiceRevivalTests.one_health_round(self, tray)
+                pending = tray.windows_updates.pending()
+                if outcome == "ready":
+                    self.assertIsNone(pending)
+                else:
+                    self.assertIsNotNone(pending)
+                    self.assertEqual(pending.commit,
+                                     "next-commit" if outcome == "newer" else tray.version.commit)
+                record = runtime_prepare.read_record(self.root / "state", pid=os.getpid())
+                self.assertEqual(record["ok"], outcome in ("ready", "newer"))
 
     def test_restart_migrates_while_the_services_are_stopped(self):
         tray = self.tray(self.manager(), self.preparation())

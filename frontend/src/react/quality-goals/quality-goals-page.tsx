@@ -92,7 +92,7 @@ export function QualityGoalsPage({ toast, ...props }: QualityGoalsProps) {
   if (!items.length) {
     return (
       <Page>
-        <EmptyState shell="plain" icon={RiSparklingLine} title="没有标记中的高清版目标">
+        <EmptyState icon={RiSparklingLine} title="没有标记中的高清版目标">
           现有版本都已满足条件，或还没有加入追踪。
         </EmptyState>
       </Page>

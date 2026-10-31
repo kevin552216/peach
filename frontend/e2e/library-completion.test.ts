@@ -4,8 +4,11 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Browser } from 'playwright-core';
 
-import { launch, layout, VIEWPORTS } from './harness.ts';
+import { launch, layout, requiredEnv, VIEWPORTS } from './harness.ts';
 import { openItemPage } from './item-fixture.ts';
+
+// 暂无预览只表示图片尚未生成，媒体仍复用测试服务提供的有效短片。
+const itemId = Number(requiredEnv('PEACH_E2E_ITEM'));
 
 describe('缺预览时的统一补全入口', () => {
   let browser: Browser;
@@ -29,7 +32,7 @@ describe('缺预览时的统一补全入口', () => {
         await page.reload({ waitUntil: 'load' });
         const prompt = page.locator('[data-library-completion]');
         await prompt.getByRole('button', { name: '更多同步方式' }).click();
-        await page.getByRole('dialog', { name: '同步方式' }).getByRole('button', { name: '仅补全资料' }).click();
+        await page.getByRole('dialog', { name: '同步方式' }).getByRole('button', { name: '仅补全影片资料' }).click();
         const dialog = page.locator('dialog[open]');
         await dialog.locator('[data-metadata-options]').waitFor();
         for (const field of ['title', 'release_date', 'tags']) {
@@ -65,7 +68,7 @@ describe('缺预览时的统一补全入口', () => {
         let pendingStage = '';
         const posts: Record<string, unknown>[] = [];
         await page.route(url => url.pathname === '/api/items', route => route.fulfill({ json: {
-          items: [{ id: 11, name: '没有预览的本地影片.mp4', medium: 'video', location: 'local',
+          items: [{ id: itemId, name: '没有预览的本地影片.mp4', medium: 'video', location: 'local',
             has_thumb: complete, has_local_poster: complete, size: 12345, duration: 3600 }],
           total: 1, has_more: false,
         } }));
@@ -123,7 +126,7 @@ describe('缺预览时的统一补全入口', () => {
         await page.keyboard.press('Enter');
         const menu = page.getByRole('dialog', { name: '同步方式' });
         await menu.waitFor();
-        assert.deepEqual(await menu.getByRole('button').allTextContents(), ['同步这些影片', '仅生成视频预览', '仅补全资料']);
+        assert.deepEqual(await menu.getByRole('button').locator(':scope > span > span:first-child').allTextContents(), ['仅补全影片资料', '仅补全预览图']);
         const box = await menu.boundingBox();
         assert.ok(box && box.x >= 0 && box.x + box.width <= viewport.width);
         await page.keyboard.press('Escape');
@@ -147,10 +150,10 @@ describe('缺预览时的统一补全入口', () => {
           await menu.waitFor({ state: 'hidden' });
         }
         await more.click();
-        await menu.getByRole('button', { name: '仅生成视频预览' }).click();
+        await menu.getByRole('button', { name: /^仅补全预览图/ }).click();
         await prompt.waitFor({ state: 'hidden' });
         await page.locator('[data-media-card] img.poster').waitFor();
-        assert.deepEqual(posts, [{ stage: 'previews', asset_ids: [11] }]);
+        assert.deepEqual(posts, [{ stage: 'previews', asset_ids: [itemId] }]);
         assert.deepEqual(opened.problems, []);
       } finally { await opened.close() }
     });

@@ -140,7 +140,7 @@ def _fetch(contract, job_id, row, code, sources, metadata_fields=None, fill_othe
         before = len(issues)
         try:
             remote.collect(row, code, list(selection.fields or engine.COLLECTED_FIELDS), contract.cover_root,
-                include_covers=False, received=received,
+                fetch_cover=False, received=received,
                 update=lambda **state: contract.item_metadata_job.update(job_id, **state),
                 issue=lambda _row, message, **_details: issues.append(str(message)))
         finally:

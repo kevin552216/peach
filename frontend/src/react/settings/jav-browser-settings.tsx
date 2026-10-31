@@ -1,27 +1,29 @@
 /* JAV 用户脚本的默认下载渠道与专用令牌。 */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { RiCheckboxBlankCircleFill } from '@remixicon/react';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { apiGet, apiSend, errorMessage } from '../../api';
-import { LoadingDots } from '../components/loading-dots';
+import { javBrowserSkeleton, rememberShape } from '../../configuration-skeleton';
 import { SourceLabel } from '../components/source-label';
-import { ErrorText, ExternalLink, FieldLabel, Footer, Help, Section, Stack } from './section';
+import { ErrorText, FieldLabel, Footer, Help, Section, SectionSkeleton, Stack } from './section';
 import { busyProps, useAction } from './use-action';
+import { UserscriptStatus } from './userscript-status';
 
 const URL = '/api/configuration/jav-browser';
 interface State {
   enabled: boolean; provider: string; available: boolean; token?: string;
+  active_provider?: string; problems?: string[];
+  userscript: { version: string; minimum_version: string; install_url: string };
   providers: { key: string; label: string; configured: boolean; target: string }[];
 }
 
 export function JavBrowserSettings({ receipt, refreshKey }: { receipt(message: string): void; refreshKey: string }) {
   const query = useQuery({ queryKey: ['jav-browser-settings', refreshKey],
-    queryFn: ({ signal }) => apiGet<State>(URL, signal), refetchOnMount: 'always' });
-  if (query.error) return <ErrorText>{errorMessage(query.error)}</ErrorText>;
-  if (query.isFetching) return <LoadingDots label="正在读取浏览器添加设置" />;
+    queryFn: ({ signal }) => apiGet<State>(URL, signal), refetchOnMount: 'always', refetchOnWindowFocus: 'always' });
+  if (query.error && !query.data) return <ErrorText>{errorMessage(query.error)}</ErrorText>;
+  if (query.isFetching && !query.data) return <SectionSkeleton label="正在读取浏览器添加设置" html={javBrowserSkeleton} />;
   return query.data ? <BrowserForm initial={query.data} receipt={receipt} /> : null;
 }
 
@@ -30,10 +32,19 @@ function BrowserForm({ initial, receipt }: { initial: State; receipt(message: st
   const [provider, setProvider] = useState(initial.provider);
   const [token, setToken] = useState('');
   const action = useAction();
+  useEffect(() => {
+    /* 启用与否决定底栏几颗键，渠道就绪与否决定那句提示在不在：下次骨架照这个结构画。 */
+    rememberShape('javBrowser', { enabled: initial.enabled,
+      ready: initial.providers.some(item => item.key === initial.provider && item.configured && item.target) });
+    setState(initial);
+    setProvider(current => initial.providers.some(item => item.key === current) ? current : initial.provider);
+    if (!initial.enabled) setToken('');
+  }, [initial]);
   const save = (kind: 'enable' | 'rotate' | 'disable') => {
     void action.run(kind, signal => apiSend<State>(URL, { action: kind, provider }, 'POST', signal), result => {
       const { token: issued = '', ...settings } = result;
       setState(settings);
+      setProvider(settings.provider);
       setToken(issued);
       receipt(kind === 'disable' ? '已关闭浏览器添加' : '已生成专用令牌');
     });
@@ -41,29 +52,34 @@ function BrowserForm({ initial, receipt }: { initial: State; receipt(message: st
   const ready = state.providers.some(item => item.key === provider && item.configured && item.target);
   return <Section title="浏览器添加 JAV">
     <Stack>
-      <div><ExternalLink href="https://sleazyfork.org/zh-CN/scripts/600821">安装 Peach 用户脚本</ExternalLink></div>
+      <div className="flex min-w-0 flex-col gap-4">
+      <UserscriptStatus enabled={state.enabled} release={state.userscript} />
       <div className="flex flex-col gap-1"><FieldLabel>浏览器添加的下载渠道</FieldLabel>
-      <Select aria-label="浏览器添加的下载渠道" selectedKey={provider}
-        onSelectionChange={key => setProvider(String(key))} isDisabled={Boolean(action.busy)}>
+      <Select aria-label="浏览器添加的下载渠道" selectedKey={provider || null} placeholder="暂无可用渠道"
+        onSelectionChange={key => { if (key !== null) setProvider(String(key)); }}
+        isDisabled={!state.providers.length || Boolean(action.busy)}>
         {state.providers.map(item => <SelectItem key={item.key} id={item.key} textValue={item.label}>
           <SourceLabel source={item.key} label={item.label} />
         </SelectItem>)}
       </Select></div>
-      {!ready ? <Help>请先保存所选网盘的账号和目标目录。</Help> : null}
+      {!ready ? <Help>请在媒体库中添加支持云下载的网盘，并配置账号与目标目录。</Help> : null}
+      {state.problems?.map(problem => <Help key={problem}>{problem}</Help>)}
+      {state.enabled && state.active_provider && !state.providers.some(item => item.key === state.active_provider)
+        ? <Help>已启用的下载渠道不可用，请选择渠道并更新令牌。</Help> : null}
       <Input label="Peach 地址" value={window.location.origin} isReadOnly autoComplete="off" />
       {token ? <>
         <Input label="浏览器添加专用令牌" type="password" value={token} isReadOnly autoComplete="new-password" />
         <div><Button variant="secondary" type="button" onClick={() => {
-          void action.run('copy', async () => navigator.clipboard.writeText(token), () => receipt('已复制专用令牌'));
-        }} {...busyProps(action.busy === 'copy')}>复制专用令牌</Button></div>
+          void action.run('copy', async () => navigator.clipboard.writeText(JSON.stringify({
+            peach_pairing: 1, base: window.location.origin, token,
+          })), () => receipt('已复制配对信息'));
+        }} {...busyProps(action.busy === 'copy')}>复制配对信息</Button></div>
+        <Help>在用户脚本设置的「Peach 地址」中粘贴配对信息，即可填好地址与令牌。</Help>
       </> : null}
+      </div>
       {action.error ? <ErrorText>{action.error}</ErrorText> : null}
     </Stack>
-    <Footer status={<span role="status" className="inline-flex items-center gap-1.5">
-      <span aria-hidden="true" className="inline-flex size-3 items-center justify-center">
-        <RiCheckboxBlankCircleFill className={state.enabled ? 'size-2 text-notification-success-foreground' : 'size-2 text-text-tertiary'} />
-      </span>{state.enabled ? '已启用' : '未启用'}
-    </span>}>
+    <Footer>
       {state.enabled ? <Button variant="secondary" type="button" disabled={Boolean(action.busy)}
         onClick={() => save('disable')}>关闭浏览器添加</Button> : null}
       <Button type="button" disabled={!state.available || !ready || Boolean(action.busy)}

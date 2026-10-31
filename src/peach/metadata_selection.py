@@ -94,7 +94,7 @@ class MetadataSelection:
         if self.fields is not None:
             if not wanted:
                 return [], 0
-            options['include_covers'] = False
+            options['fetch_cover'] = False
         return remote.collect(row, code, wanted, cover_root, **options)
 
     def answered(self, groups, target_key, fields, verify_existing=False):

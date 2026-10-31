@@ -9,12 +9,35 @@ import time
 from pathlib import Path
 
 
-def assert_bridge_resources():
-    """已安装 wheel 的桥脚本、清单与锁来自发行资源。"""
-    from peach.metadata_amane import BRIDGE_ROOT
-    assert '_resources' in BRIDGE_ROOT.parts, BRIDGE_ROOT
-    for name in ('bridge.py', 'pyproject.toml', 'uv.lock'):
-        assert (BRIDGE_ROOT / name).is_file(), BRIDGE_ROOT / name
+def assert_bridge(client, headers):
+    """桥资源与设置接口必须提供同一份固定版本事实。"""
+    from peach.metadata_amane import BRIDGE_SCRIPT, locked_version, pinned_revision
+    assert BRIDGE_SCRIPT.is_file()
+    bridge = client.get('/api/scraping/amane-bridge', headers=headers)
+    assert bridge.status_code == 200, bridge.text
+    assert bridge.json()['revision'] == pinned_revision()
+    assert bridge.json()['version'] == locked_version() and locked_version()
+
+
+def stop_server(process, log_root):
+    """关闭本轮服务进程树，等待日志持有者实际退出。"""
+    if os.name == 'nt':
+        from peach.jobs import process_alive
+        runtime_pids = [int(path.stem.removeprefix('crash-'))
+                        for path in log_root.glob('crash-*.log')
+                        if path.stem.removeprefix('crash-').isdigit()]
+        stopped = subprocess.run([str(Path(os.environ['SystemRoot']) / 'System32/taskkill.exe'),
+            '/PID', str(process.pid), '/T', '/F'], capture_output=True, timeout=15)
+        if stopped.returncode and process.poll() is None:
+            raise RuntimeError('wheel 冒烟服务进程树未能关闭')
+        deadline = time.monotonic() + 15
+        while any(process_alive(pid) for pid in runtime_pids):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('wheel 冒烟服务仍持有临时日志')
+            time.sleep(0.05)
+    else:
+        process.terminate()
+    process.wait(timeout=15)
 
 
 def main():
@@ -40,7 +63,6 @@ def main():
         from peach.migrations import upgrade
         assert "site-packages" in Path(peach.__file__).parts, peach.__file__
         assert "_resources" in MIGRATIONS_DIR.parts, MIGRATIONS_DIR
-        assert_bridge_resources()
         database = root / "ledger.db"
         assert upgrade(database, MIGRATIONS_DIR)
         settings = PeachSettings(db_path=database, configured=True, token="wheel-smoke")
@@ -57,8 +79,9 @@ def main():
             for name in ("peach-app.js", "peach-app.css", "peach-pages.js", "peach-pages.css"):
                 assert (settings.page_path.parent / "dist" / name).is_file()
             assert any(settings.vendor_path.iterdir())
+            assert_bridge(client, headers)
             print(json.dumps({"module": peach.__file__, "ready": ready.json(),
-                              "checks": ["migrations", "web", "vendor", "frontend", "auth", "items"]}))
+                              "checks": ["migrations", "web", "vendor", "frontend", "auth", "items", "amane-bridge"]}))
         finally:
             client.close()
         with socket.socket() as reservation:
@@ -87,8 +110,7 @@ def main():
                         assert response.status_code == 200, (path, response.status_code)
                     print(json.dumps({"tcp": "passed", "init_repeat": "existing_config_preserved"}))
             finally:
-                process.terminate()
-                process.wait(timeout=15)
+                stop_server(process, root / 'data/logs')
 
 
 if __name__ == "__main__":

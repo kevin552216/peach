@@ -12,12 +12,12 @@
  *
  * 「读取浏览器历史」是后台任务，关掉页面照样在跑。首屏读到的旧终态不冒充新结果：只有本次
  * 点过读取、或者本次亲眼见过它在跑，终态才发回执并让 dashboard 重取（ADR-0031）。 */
-import { useRef, useState } from 'react';
+import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
 import type { ChangeEvent } from 'react';
 import {
   RiArrowDownSLine, RiArrowRightSLine, RiCompassLine, RiDatabase2Line, RiDeleteBinLine,
   RiEyeLine, RiHistoryLine, RiPriceTag3Line, RiSearchLine, RiThumbDownLine,
-  RiThumbUpLine, RiUploadLine, RiBookmarkLine,
+  RiThumbUpLine, RiUploadLine, RiBookmarkLine, RiExternalLinkLine,
 } from '@remixicon/react';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { Popover, Tab, TabPanel, Tabs } from 'react-aria-components';
@@ -27,7 +27,7 @@ import { avatarInner } from '@peach/card-art';
 import { firstGrapheme, fmtSize, siteMarkUrl } from '@peach/legacy/core';
 import { confirmModal } from '@peach/legacy/ui';
 
-import { Button } from '@/components/base/buttons/button';
+import { Button, ButtonLink } from '@/components/base/buttons/button';
 import {
   MENU_ITEM, MENU_ITEM_INTERACTIVE, MENU_POPOVER_SURFACE,
 } from '@/components/base/dropdown/menu-styles';
@@ -56,7 +56,8 @@ import { BrowserSources, SOURCE_TILE } from './browser-sources';
 import {
   DEFAULT_WINDOW, fetchTaste, fetchTasteJob, historySpan, IDLE_POLL_MS, importTasteExport, radarRows,
   rankDetail, rankShares, removeTasteSource, startTasteRefresh, tasteDate, tasteDimensions, tasteHours,
-  tasteKey, TASTE_REFRESH_KEY, TASTE_WINDOWS, type RankRow, type TasteData, type TasteJob,
+  tasteKey, tasteRefetchInterval, tasteTime, TASTE_REFRESH_KEY, TASTE_WINDOWS, type RankRow, type TasteData,
+  type TasteJob,
 } from './taste';
 
 /** 收起时露这么多条名次。二十条一次铺开会把下面几块整个顶到屏外。 */
@@ -69,10 +70,10 @@ const TILE = 'rounded-xl bg-background-primary-default p-3';
 
 /* 中文正文写成常量：JSX 里换行的文字会在接缝处多出一个空格，中文句子里看得见。 */
 const REFRESH_TITLE = '读取运行 Peach 的这台电脑上的浏览历史与书签';
-const NO_SOURCE_HINT = '导入或读取浏览记录后，这里会列出已采集设备。';
-const NO_LEAD_HINT = '馆藏里暂时没有对得上浏览信号的标签。';
-const NO_CATEGORY_HINT = '采集浏览记录后，这里会显示聚合后的口味证据。';
-const GAP_HINT = '这些词在浏览记录中出现，但 Peach 观看记录还没有对应证据';
+const NO_SOURCE_HINT = '导入或读取浏览记录后，这里会列出记录来自哪些设备。';
+const NO_LEAD_HINT = '馆藏中暂时没有与你浏览过的内容相符的标签。';
+const NO_CATEGORY_HINT = '读取浏览记录后，这里会按类别汇总你浏览过的内容。';
+const GAP_HINT = '这些标签出现在浏览记录中，Peach 的观看或评价记录中尚未出现这些标签';
 const NO_BROWSER_TAG_HINT = '采集浏览记录后，这里会列出浏览过的标签。';
 const NO_BROWSER_CREATOR_HINT = '采集浏览记录后，这里会列出浏览过的创作者。';
 const NO_DOMAIN_HINT = '采集浏览记录后，这里会列出常访问的网站。';
@@ -88,6 +89,12 @@ const REMOVE_BODY = '删除这个来源的已导入记录，原始文件保留�
 export const TASTE_GUIDE_KEY = 'peach-taste-guide-dismissed';
 
 type Glyph = typeof RiEyeLine;
+
+const TasteEmptyAction = createContext<ReactNode>(<ButtonLink size="small" href="/">浏览馆藏</ButtonLink>);
+
+function TasteRecordActions() {
+  return useContext(TasteEmptyAction);
+}
 
 /** 一格读数：一个名字、一个大数、一句它的来历。和统计页的读数卡是同一张卡。 */
 function SummaryCard({ icon: Icon, term, figure, detail, detailTitle, accent }:
@@ -136,7 +143,8 @@ interface RankListProps {
 /** 一榜名次。点得动的那些是按钮，其余是行——馆藏里没有对应条目时点进去只会是一张空页。 */
 function RankList({ rows, kind, visual, empty, onSignal }: RankListProps) {
   if (!rows.length) {
-    return <EmptyState shell="plain" icon={RiSearchLine} title="暂无足够证据">{empty}</EmptyState>;
+    return <EmptyState size="compact" icon={RiSearchLine} title="记录还不够"
+      actions={<TasteRecordActions />}>{empty}</EmptyState>;
   }
   const shares = rankShares(rows);
   return (
@@ -268,7 +276,8 @@ function AnalysisCard({ data, onSignal, navigate }:
             </button>
           ))}
         </div>
-      ) : <EmptyState shell="plain" icon={RiSearchLine} title="还没有可探索的入口">{NO_LEAD_HINT}</EmptyState>}
+      ) : <EmptyState size="compact" icon={RiSearchLine} title="还没有可探索的入口"
+        actions={<ButtonLink size="small" href="/">浏览馆藏</ButtonLink>}>{NO_LEAD_HINT}</EmptyState>}
     </section>
   );
 }
@@ -291,12 +300,12 @@ function HistoryGuide({ onboarding, done }: { onboarding: boolean; done: boolean
         <ul className="flex list-disc flex-col gap-1 pl-5 text-body-2-regular text-text-secondary">
           <li>
             Chrome：在 <a href="https://takeout.google.com/" target="_blank" rel="noopener noreferrer"
-              className="text-text-primary underline-offset-4 hover:underline">Google Takeout</a>
+              className="text-text-primary underline-offset-4 hover:underline">Google Takeout<RiExternalLinkLine aria-hidden className="size-(--icon-inline) shrink-0" /></a>
             {' '}选择 Chrome 历史记录，下载 ZIP 后直接导入。
           </li>
           <li>
             其他浏览器：用 <a href="https://github.com/purarue/browserexport" target="_blank" rel="noopener noreferrer"
-              className="text-text-primary underline-offset-4 hover:underline">browserexport</a>
+              className="text-text-primary underline-offset-4 hover:underline">browserexport<RiExternalLinkLine aria-hidden className="size-(--icon-inline) shrink-0" /></a>
             {' '}导出历史记录，再导入导出文件。
           </li>
         </ul>
@@ -349,8 +358,8 @@ function HistoryActions(
 
 /** 已采集设备。移除只影响分析，原始导出文件仍在本机。 */
 function SourceList(
-  { sources, browsers, window: range, toast }:
-  { sources: NonNullable<TasteData['sources']>; browsers: NonNullable<TasteData['browsers']>; window: string } & Pick<TasteProps, 'toast'>,
+  { sources, browsers, window: range, toast, emptyActions }:
+  { sources: NonNullable<TasteData['sources']>; browsers: NonNullable<TasteData['browsers']>; window: string; emptyActions: ReactNode } & Pick<TasteProps, 'toast'>,
 ) {
   const remove = useMutation({
     mutationFn: (sourceKey: string) => removeTasteSource(sourceKey, range),
@@ -391,7 +400,8 @@ function SourceList(
             </div>
           ))}
         </>
-      ) : !browsers.length ? <EmptyState shell="plain" icon={RiDatabase2Line} title="还没有数据源">{NO_SOURCE_HINT}</EmptyState> : null}
+      ) : !browsers.length ? <EmptyState size="compact" icon={RiDatabase2Line} title="还没有数据源"
+        actions={emptyActions}>{NO_SOURCE_HINT}</EmptyState> : null}
     </BrowserSources>
   );
 }
@@ -409,6 +419,7 @@ export function TastePage(props: TasteProps) {
     /* 换范围时留住上一份：这一屏的结构不变，只有数在变。退回骨架就是把已经读到的东西
        收走再放回来，而服务端那一层缓存多半立刻就回来了。 */
     placeholderData: keepPreviousData,
+    refetchInterval: (query) => tasteRefetchInterval(query.state.data),
   });
   const { job, running, outcome, start: refresh } = useBackgroundJob<TasteJob>({
     queryKey: TASTE_REFRESH_KEY,
@@ -421,6 +432,12 @@ export function TastePage(props: TasteProps) {
       void queryClient.invalidateQueries({ queryKey: ['taste'] });
       toast(state.warnings?.length ? '部分浏览记录未取得' : '已更新口味分析');
     },
+  });
+  /* 重算失败后服务端暂不再算，页面也停了轮询。「立即重试」让服务端跳过等待再算一次，回来的
+     那一份换进它所属范围的缓存：算完就是新结果，还在算就带着 `stale` 接着轮询。 */
+  const retry = useMutation({
+    mutationFn: (window: string) => fetchTaste(window, undefined, true),
+    onSuccess: (result, window) => { queryClient.setQueryData(tasteKey(window), result) },
   });
   const load = useMutation({
     mutationFn: (chosen: File) => importTasteExport(chosen),
@@ -469,18 +486,26 @@ export function TastePage(props: TasteProps) {
   const identified = coverage.identified || 0;
   const problem = refresh.error ? errorMessage(refresh.error)
     : load.error ? errorMessage(load.error)
+    : retry.error ? errorMessage(retry.error)
     : outcome?.status === 'failed' ? (outcome.error || '读取未取得')
     : '';
 
+  const browserActions = <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="secondary" {...busyProps(running || refresh.isPending || load.isPending)} onClick={startRefresh}>读取浏览器记录</Button>
+            <Button variant="secondary" {...busyProps(load.isPending)} onClick={() => file.current?.click()}>导入历史文件</Button>
+          </div>;
   return (
     <Page>
+      <TasteEmptyAction value={range !== DEFAULT_WINDOW
+        ? <Button size="small" variant="secondary" onClick={() => setRange(DEFAULT_WINDOW)}>查看全部时间</Button>
+        : evidence === 'peach' ? <ButtonLink size="small" variant="secondary" href="/">浏览馆藏</ButtonLink> : browserActions}>
       <Tabs selectedKey={evidence} onSelectionChange={(key) => setEvidence(String(key))}
         className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* 旧 `.insightswitch`：证据来源是两个互斥视图，形态是分段控件不是两枚裸按钮。 */}
-          <TabList aria-label="口味证据来源" className={SEGMENTED_TRACK}>
+          <TabList aria-label="口味分析的数据来源" className={SEGMENTED_TRACK}>
             <Tab id="browser" className={SEGMENT}>浏览器记录</Tab>
-            <Tab id="peach" className={SEGMENT}>Peach 内部</Tab>
+            <Tab id="peach" className={SEGMENT}>Peach 观看与评价</Tab>
           </TabList>
           <div className="flex flex-wrap items-center gap-2">
             <Select aria-label="分析范围" selectedKey={range}
@@ -504,6 +529,12 @@ export function TastePage(props: TasteProps) {
           {running ? <TaskProgress label={job?.message || '正在读取浏览记录并更新口味分析'}
             value={job?.checked} total={job?.total} /> : null}
           {load.isPending ? <TaskProgress label="正在导入口味数据" /> : null}
+          {data.stale && data.error ? (
+            <Note tone="error" action={<Button variant="secondary" size="small"
+              {...busyProps(retry.isPending)} onClick={() => retry.mutate(range)}>立即重试</Button>}>
+              {`口味分析更新失败，当前显示 ${tasteTime(data.computed_at)} 的结果。${data.error}`}
+            </Note>
+          ) : data.stale ? <TaskProgress label={`正在更新口味分析，当前显示 ${tasteTime(data.computed_at)} 的结果`} /> : null}
           {problem ? <Note tone="error">{problem}</Note> : null}
           {outcome?.warnings?.length ? <Note tone="warning">{outcome.warnings.join('；')}</Note> : null}
         </div>
@@ -534,7 +565,8 @@ export function TastePage(props: TasteProps) {
             <div className="flex min-w-0 grow flex-col">
               {categories.length
                 ? <RankedBars rows={categories} label="口味维度排名" />
-                : <EmptyState shell="plain" icon={RiSearchLine} title="暂无口味维度">{NO_CATEGORY_HINT}</EmptyState>}
+                : <EmptyState size="compact" icon={RiSearchLine} title="暂无口味维度"
+                  actions={<TasteRecordActions />}>{NO_CATEGORY_HINT}</EmptyState>}
             </div>
           </section>
           <ActivityHeat activity={data.activity} title="浏览活跃时间" dailyTitle="每日活跃"
@@ -565,7 +597,7 @@ export function TastePage(props: TasteProps) {
               <b className="text-display-4-medium tabular-nums text-text-primary">
                 {Number(summary.peach_items || 0).toLocaleString()}
               </b>
-              <span className="text-body-2-regular text-text-secondary">个作品有内部行为证据</span>
+              <span className="text-body-2-regular text-text-secondary">部作品有观看或评价记录</span>
             </div>
             <div className="flex min-w-0 grow flex-col">
               <CoverageMetric term="有标签" value={tagged} rest={coverage.untagged || 0} />
@@ -581,7 +613,8 @@ export function TastePage(props: TasteProps) {
         </TabPanel>
       </Tabs>
       <AnalysisCard data={data} onSignal={onSignal} navigate={navigate} />
-      <SourceList sources={data.sources || []} browsers={data.browsers || []} window={range} toast={toast} />
+      <SourceList sources={data.sources || []} browsers={data.browsers || []} window={range} toast={toast} emptyActions={browserActions} />
+      </TasteEmptyAction>
     </Page>
   );
 }

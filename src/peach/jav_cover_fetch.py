@@ -57,7 +57,7 @@ from peach.scripting import USER_AGENT, open_readonly
 from peach.config import COVER_DIR, DATABASE_PATH, GENERATED_DIR, SOURCES_DIR
 from peach.http import HttpRequest, HttpTransport, HttpxTransport
 from peach.scripting import HostLimiter
-from peach.scraping_access import SOURCES, SourcePaused, SourceTransport, source_for
+from peach.scraping_access import SOURCES, SourceBudgetExhausted, SourcePaused, SourceTransport, source_for
 from peach.config import SECRETS_DIR
 from peach.jobs import DiskGuard, JobPolicyError
 from peach.task_runs import TaskRunHandle, cli_run, inert_handle
@@ -71,6 +71,7 @@ from peach.catalog_rules import (
     normalise_code_key,
 )
 from peach.metadata_policy import SOURCE_SPECS
+from peach import upgrade_rules
 
 AWS_LEGACY_DIGITAL = (
     "https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/{cid}/{cid}pl.jpg"
@@ -191,17 +192,21 @@ class CoverConnectError(Unavailable):
 
 
 class HostLimitedTransport:
-    """把请求间隔按主机分别计算；不同官方站点互不阻塞。"""
+    """把请求间隔按主机分别计算；不同官方站点互不阻塞。
+
+    给了 `limiter` 就按它等：几个传输共用一份间隔，同时跑的任务问同一主机也不会叠在一起。
+    """
 
     def __init__(self, inner: HttpxTransport, interval: float, *,
                  intervals: dict[str, float] | None = None,
-                 clock=time.monotonic, sleeper=time.sleep) -> None:
+                 clock=time.monotonic, sleeper=time.sleep,
+                 limiter: HostLimiter | None = None) -> None:
         self.inner = inner
         self.interval = max(0.0, interval)
         self.clock = clock
         self.sleeper = sleeper
-        self.limiter = HostLimiter(dict(intervals or {}), default_interval=self.interval,
-                                   clock=clock, sleeper=sleeper)
+        self.limiter = limiter or HostLimiter(dict(intervals or {}), default_interval=self.interval,
+                                              clock=clock, sleeper=sleeper)
 
     def __call__(self, request: HttpRequest, timeout: float, limit: int):
         self.limiter.wait(request.url)
@@ -426,6 +431,21 @@ def official_image_candidates(url: str) -> list[Candidate]:
     if urlparse(clean).netloc.lower().endswith("mgstage.com"):
         return [candidate_for(clean)]
     return []
+
+
+#: 库外卡片经 `/cover-image` 取图时放行的主机后缀，与 `official_image_candidates` 认的两家一致；
+#: 代理跟重定向的每一跳也按它核对。
+COVER_PROXY_HOSTS = ("dmm.co.jp", "dmm.com", "mgstage.com")
+
+
+def proxyable_cover_url(url: str) -> bool:
+    """能经 Peach 代理显示的封面地址：https、官方图片主机、官方图路径。"""
+    clean = str(url or "").strip()
+    parsed = urlparse(clean)
+    host = (parsed.hostname or "").casefold()
+    return (parsed.scheme == "https" and not parsed.username and not parsed.password
+            and any(host == suffix or host.endswith("." + suffix) for suffix in COVER_PROXY_HOSTS)
+            and bool(official_image_candidates(clean)))
 
 
 def content_id_images(content_id: str) -> list[Candidate]:
@@ -705,11 +725,26 @@ def prestige_images(transport: HttpTransport, code: str, *,
     return []
 
 
+def _source_query(query, *, empty, record):
+    """单个来源冷却只记为未作答；本趟预算耗尽继续交给任务停止。"""
+    try:
+        return query()
+    except SourceBudgetExhausted:
+        raise
+    except SourcePaused:
+        record('source_unanswered')
+        record('paused')
+        return empty()
+
+
 def prestige_group_images(transport: HttpTransport, code: str, *,
-                          deadline: float | None = None) -> list[Candidate]:
+                          deadline: float | None = None, record=lambda key: None) -> list[Candidate]:
     """汇总 Prestige 与 MGS 的官方候选，尺寸由统一探测比较。"""
-    official = prestige_images(transport, code, deadline=deadline)
-    return _unique_candidates(official + mgstage_images(transport, code, deadline=deadline))
+    official = _source_query(lambda: prestige_images(transport, code, deadline=deadline),
+                              empty=list, record=record)
+    mgs = _source_query(lambda: mgstage_images(transport, code, deadline=deadline),
+                         empty=list, record=record)
+    return _unique_candidates(official + mgs)
 
 
 def probe_size(transport: HttpTransport, candidate: Candidate, *,
@@ -756,29 +791,40 @@ def _site_candidates(transport: HttpTransport, code: str, evidence: MetadataEvid
     prestige = _is_prestige(evidence) or 'prestige' in maker_sites(code)
     amateur = is_amateur_code(code) or 'mgstage' in evidence.sources
     if prestige:
-        candidates += prestige_group_images(transport, code, deadline=deadline)
+        candidates += prestige_group_images(transport, code, deadline=deadline, record=record)
     elif amateur:
-        candidates += mgstage_images(transport, code, deadline=deadline)
+        candidates += _source_query(lambda: mgstage_images(transport, code, deadline=deadline),
+                                     empty=list, record=record)
     if candidates or ((prestige or amateur) and evidence.candidates):
         return candidates
     if ('dmm' not in evidence.sources
             and not prestige and not amateur and not is_uncensored_code(code)):
         try:
-            live_evidence = dmm_evidence(transport, code, deadline=deadline)
+            live_evidence = _source_query(lambda: dmm_evidence(transport, code, deadline=deadline),
+                                           empty=MetadataEvidence, record=record)
             candidates += list(live_evidence.candidates)
-        except (Unavailable, SourcePaused):
+        except (Unavailable, httpx.TransportError):
             record('source_unanswered')
     # 有成功快照时不重复打 r18；失败快照不算证据，仍允许联网刷新。
     if ('r18dev' not in evidence.sources and not live_evidence.candidates
             and not ('dmm' in evidence.sources and evidence.candidates)):
-        live_evidence = r18_evidence(transport, code, deadline=deadline, record=record)
+        live_evidence = _source_query(
+            lambda: r18_evidence(transport, code, deadline=deadline, record=record),
+            empty=MetadataEvidence, record=record)
         candidates += list(live_evidence.candidates)
         _sleep_within(delay, deadline)
     # 目录新识别出 Prestige 时补问集团自营渠道。
     if not prestige and _is_prestige(live_evidence):
-        candidates += prestige_group_images(transport, code, deadline=deadline)
+        candidates += prestige_group_images(transport, code, deadline=deadline, record=record)
         _sleep_within(delay, deadline)
     return candidates
+
+
+def _unanswered_error(diagnostics: dict, message: str) -> Exception:
+    unanswered = sum(diagnostics.get(key, 0) for key in ('source_unanswered', 'unanswered', 'download_failed'))
+    if unanswered and diagnostics.get('paused', 0) == unanswered:
+        return SourcePaused('封面来源正在冷却，请稍后重试；已有图片保留')
+    return Unavailable(message)
 
 
 def best_cover(transport: HttpTransport, code: str, delay: float, *,
@@ -816,7 +862,7 @@ def best_cover(transport: HttpTransport, code: str, delay: float, *,
     def source_transport(request, timeout, limit):
         try:
             response = transport(request, timeout, limit)
-        except (httpx.TransportError, SourcePaused):
+        except httpx.TransportError:
             record('source_unanswered')
             raise
         if response.status not in (200, 206, 404):
@@ -831,18 +877,25 @@ def best_cover(transport: HttpTransport, code: str, delay: float, *,
                                             deadline=deadline, record=record)])
     if not asked:
         if diagnostics.get('source_unanswered'):
-            raise Unavailable('官方目录查询未完成，尚未取得封面候选')
+            raise _unanswered_error(diagnostics, '官方目录查询未完成，尚未取得封面候选')
         raise NotFound("所有渠道都没有候选")
     measured = _measure(transport, asked, record, minimum_width=minimum_width,
                         delay=delay, deadline=deadline)
     if not measured:
         # 每张候选都回过话（404、太小、占位图、解不开）就是来源的确定答复，下次再问还是这几张：
         # 交 `NotFound`，采集任务记下一周不问。有一张断在连接、5xx 或拒绝访问上才可能是这趟没问成。
-        kind = Unavailable if diagnostics.get("unanswered") else NotFound
-        raise kind(_no_usable_official(diagnostics))
-    return _download_best(transport, measured, record, minimum_width=minimum_width,
-                          minimum_quality=minimum_quality, minimum_pixels=minimum_pixels,
-                          deadline=deadline)
+        if diagnostics.get("unanswered") or diagnostics.get('source_unanswered'):
+            raise _unanswered_error(diagnostics, _no_usable_official(diagnostics))
+        raise NotFound(_no_usable_official(diagnostics))
+    try:
+        return _download_best(transport, measured, record, minimum_width=minimum_width,
+                              minimum_quality=minimum_quality, minimum_pixels=minimum_pixels,
+                              deadline=deadline)
+    except Unavailable as error:
+        if (diagnostics.get('source_unanswered') or diagnostics.get('unanswered')
+                or diagnostics.get('paused')):
+            raise _unanswered_error(diagnostics, str(error)) from error
+        raise
 
 
 def _measure(transport: HttpTransport, candidates, record, *, minimum_width: int,
@@ -859,6 +912,13 @@ def _measure(transport: HttpTransport, candidates, record, *, minimum_width: int
         for candidate in candidates:
             try:
                 width, height = probe_size(transport, candidate, deadline=deadline)
+            except (SourceBudgetExhausted, InterruptedError):
+                raise
+            except SourcePaused:
+                record('paused')
+                record('unanswered')
+                answered += 1
+                continue
             except httpx.TransportError as error:
                 record(_probe_failure(error))
                 record("unanswered")
@@ -905,6 +965,12 @@ def _download_best(transport: HttpTransport, measured, record, *, minimum_width:
         try:
             data = _fetch(transport, winner.url, referer=winner.referer,
                           limit=16 * 1024 * 1024, deadline=deadline)
+        except SourceBudgetExhausted:
+            raise
+        except SourcePaused:
+            record('paused')
+            record('download_failed')
+            continue
         except (Unavailable, httpx.TransportError):
             record("download_failed")
             continue
@@ -933,7 +999,7 @@ def _download_best(transport: HttpTransport, measured, record, *, minimum_width:
     raise Unavailable("可用候选完整下载都失败")
 
 
-FIELDS = ("code", "result", "source", "width", "height", "kb", "url", "note")
+FIELDS = ("code", "result", "source", "width", "height", "kb", "url", "note", "outcome", "catalog_rules")
 
 
 #: 判定为「所有渠道都没有」的落空，续跑时不必重来；连接类失败必须重试。
@@ -948,8 +1014,20 @@ def settled_misses(log: Path) -> set[str]:
     150 条落空，重探一遍就是好几个小时，而结论不会变。
     """
     rows = logged_rows(log)
+
+    def confirmed(row):
+        outcome = str(row.get('outcome') or '')
+        if outcome not in ('', 'not_found'):
+            return False
+        if str(row.get('code') or '').strip().upper().startswith('FC2-PPV-'):
+            note = str(row.get('note') or '')
+            return not note.startswith(('Unavailable:', 'SourcePaused:', 'DeadlineExceeded:'))
+        return (outcome == 'not_found'
+                and str(row.get('catalog_rules')) == str(upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES))
+
     return {str(row.get("code") or "").strip() for row in rows
             if row.get("result") == "未取得"
+            and confirmed(row)
             and not TRANSIENT.search(str(row.get("note") or ""))
             and str(row.get("code") or "").strip()}
 
@@ -1162,6 +1240,14 @@ def _replace_log_row(rows: list[dict], code: str, replacement: dict) -> None:
     rows.append({field: replacement.get(field, "") for field in FIELDS})
 
 
+def failure_log_row(code: str, error: Exception) -> dict:
+    """批量封面的未取得记录，区分确定无图与本次未作答。"""
+    return {"code": code, "result": "未取得", "source": "", "width": "", "height": "",
+            "kb": "", "url": "", "note": f"{type(error).__name__}: {error}"[:80],
+            "outcome": 'not_found' if isinstance(error, NotFound) else 'unavailable',
+            "catalog_rules": upgrade_rules.OFFICIAL_COVER_CATALOG_MISSES}
+
+
 def run(args: argparse.Namespace, handle: TaskRunHandle | None = None) -> int:
     """跑一趟封面抓取。`handle` 是任务中心的句柄，缺省时这一趟不登记。"""
     handle = handle or inert_handle()
@@ -1288,9 +1374,7 @@ def run(args: argparse.Namespace, handle: TaskRunHandle | None = None) -> int:
                     print(f"[{index}/{len(todo)}] 保留 {code}：重探失败 "
                           f"{type(exc).__name__} {exc}", flush=True)
                 else:
-                    rows.append({"code": code, "result": "未取得", "source": "",
-                                 "width": "", "height": "", "kb": "", "url": "",
-                                 "note": f"{type(exc).__name__}: {exc}"[:80]})
+                    rows.append(failure_log_row(code, exc))
                     print(f"[{index}/{len(todo)}] 未取得 {code}："
                           f"{type(exc).__name__} {exc}", flush=True)
             else:

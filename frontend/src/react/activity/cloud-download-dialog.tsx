@@ -27,7 +27,7 @@ export interface DownloadPrefill { code?: string; title?: string; origin?: strin
 const RECEIPTS: Partial<Record<DownloadSubmitResult['outcome'], string>> = {
   submitted: '已提交离线下载，进度在任务中心',
   adopted: '这个磁力已有任务，没有重复提交',
-  adopted_remote: '远端已有同一任务，已接管',
+  adopted_remote: '网盘中已有相同的下载任务，Peach 已开始跟踪进度',
 };
 
 export function CloudDownloadDialog({ prefill, close, receipt, provider }: {
@@ -83,7 +83,7 @@ function SubmitForm({ header, snapshot, prefill, close, receipt, provider: prefe
   const client = useQueryClient();
   const configured = snapshot.providers.filter((row) => row.configured);
   const first = configured.find((row) => row.key === preferred) ?? configured[0];
-  const [provider, setProvider] = useState<DownloadProviderKey>(first?.key || 'pikpak');
+  const [provider, setProvider] = useState<DownloadProviderKey | ''>(first?.key || '');
   const [magnet, setMagnet] = useState('');
   const [code, setCode] = useState(prefill.code ?? '');
   const [target, setTarget] = useState(first?.target || '');
@@ -138,7 +138,7 @@ function SubmitForm({ header, snapshot, prefill, close, receipt, provider: prefe
           value={magnet} onChange={setMagnet} />
         <div className="flex flex-col gap-1">
           <FieldLabel>下载到</FieldLabel>
-          <Select aria-label="下载到" selectedKey={provider} isDisabled={!configured.length}
+          <Select aria-label="下载到" selectedKey={provider || null} isDisabled={!configured.length}
             onSelectionChange={(key) => { if (key !== null) choose(String(key) as DownloadProviderKey) }}>
             {configured.map((row) => <SelectItem key={row.key} id={row.key} textValue={row.label}><SourceLabel source={row.key} label={row.label} /></SelectItem>)}
           </Select>

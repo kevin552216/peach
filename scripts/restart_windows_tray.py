@@ -81,7 +81,12 @@ def main(argv: list[str] | None = None) -> int:
             failed = "；".join(step["message"] for step in startup.get("steps", ())
                               if step.get("state") in ("failed", "stale"))
             payload["ok"] = False
-            payload["message"] += f"；新托盘启动准备失败：{failed}"
+            if failed:
+                payload["message"] += f"；新托盘启动准备失败：{failed}"
+            elif any(step.get("state") == "pending" for step in startup.get("steps", ())):
+                payload["message"] += "；新托盘服务仍在启动，请查看托盘状态"
+            else:
+                payload["message"] += "；新托盘启动准备未完成"
     print(json.dumps(payload, ensure_ascii=False))
     return 0 if payload["ok"] else 1
 

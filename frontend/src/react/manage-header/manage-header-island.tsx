@@ -17,6 +17,7 @@ import { swapText } from '@peach/legacy/ui';
 
 import { manageHeaderView, TRASH_LEDE_SKELETON_HTML, type ManageHeaderProps, type ManageHeaderView } from '../../manage-header';
 import { Icon } from '../settings-panel/icon';
+import { PillTabList } from '../components/pill-tabs';
 import type { ManageHeaderApi, ManageHeaderHost } from './manage-header-api';
 import './manage-header.css';
 
@@ -80,17 +81,18 @@ function ManageBar({ host: at, pressed: key, menu }: Pick<ManageHeaderProps, 'me
 
   return (
     <nav data-manage-bar="" aria-label="管理">
-      <div ref={row} data-manage-menu="">
+      <PillTabList ref={row} data-manage-menu="" data-pill-nav="">
         {menu.map(([entry, label, glyph]) => {
           const on = entry === key;
           return (
             <button key={entry} type="button" data-manage={entry} aria-pressed={on} aria-current={on ? 'page' : undefined}
+              data-pill-selected={on ? '' : undefined} data-pill-variant="gray"
               onClick={() => at.openManage(entry)}>
               <Icon name={glyph} /><span>{label}</span>
             </button>
           );
         })}
-      </div>
+      </PillTabList>
     </nav>
   );
 }
@@ -105,7 +107,7 @@ function Crumb({ host: at, label }: { host: ManageHeaderHost; label: string }) {
     at.openDataCleanup();
   };
   return (
-    <nav data-manage-crumb="" aria-label="Breadcrumb">
+    <nav data-manage-crumb="" aria-label="当前位置">
       <ol>
         <li><a href="/data-cleanup" onClick={follow}>数据管理</a><Icon name="chevron-right" /></li>
         <li aria-current="true"><span>{label}</span></li>

@@ -40,7 +40,7 @@ class ItemMetadataTests(unittest.TestCase):
                    'source_url': 'https://fc2cmadb.com/articles/1234567'}
         class Remote:
             def collect(_self, _row, _code, missing, _cover, *, received, **options):
-                self.assertFalse(options['include_covers'])
+                self.assertFalse(options['fetch_cover'])
                 received([('fc2cmadb', payload, self.root / 'unused')])
             def close(_self):
                 pass
@@ -79,7 +79,7 @@ class ItemMetadataTests(unittest.TestCase):
         row, code = metadata._asset(self.contract, 1)
         remote = metadata._SelectedSource(self.config, 'fc2cmadb')
         with patch.object(remote, '_metadata', return_value=[]) as query, patch.object(remote, '_cover') as cover:
-            remote.collect(row, code, ['performers'], self.root / 'covers', include_covers=False,
+            remote.collect(row, code, ['performers'], self.root / 'covers', fetch_cover=False,
                            update=lambda **_state: None, issue=lambda *_args, **_options: None)
         query.assert_called_once()
         cover.assert_not_called()
@@ -134,7 +134,7 @@ class ItemMetadataTests(unittest.TestCase):
                 _self.source = source
             def collect(_self, _row, _code, missing, _cover, *, received, issue, **options):
                 queried.append(_self.source)
-                self.assertFalse(options['include_covers'])
+                self.assertFalse(options['fetch_cover'])
                 if _self.source == 'javdb':
                     issue(_row, 'JavDB：HTTP 429，请稍后重试')
                     return

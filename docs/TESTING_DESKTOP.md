@@ -56,9 +56,11 @@ Windows 第一次询问防火墙权限时，只勾选「专用网络」。
 
 完整安装包和完整免安装 ZIP 均包含 FFmpeg 与 ffprobe，位于程序目录的 `tools\ffmpeg\bin`；轻量安装包会在安装时备齐工具。转码、媒体信息探测与缩略图无需额外配置。`*-update.zip` 由 Peach 更新器校验和安装，不提供手动导入入口；首次安装使用任一安装包或完整免安装包。`tools-*.zip` 由更新器或轻量安装包按需处理。
 
+完整安装包和完整免安装 ZIP 还包含头像取景与比对用的人脸模型，位于 `tools\face-models`，连同两个模型的许可证（YuNet 为 MIT，SFace 为 Apache-2.0）；没有网络也能用。这份模型被删除、被安全软件隔离或校验不符时，Peach 会改为联网下载到数据目录，失败时在活动中心「需要处理」里提示并可立即重试。
+
 缺索引 MP4 修复使用随包的 `tools\untrunc\untrunc.exe`，需要同编码参数的完整片作为参照。该工具与其兼容的 FFmpeg 库独立构建，按 GPL-2.0-or-later 分发；完整对应源码制品为同一 Release 中的 `untrunc-corresponding-source.zip`。显式 `PEACH_UNTRUNC` 优先于随包工具，其后查数据目录与 PATH。
 
-工具以独立进程调用，按 GPL-3.0-or-later 分发；工具目录包含许可证、构建配置、来源清单和 SHA-256。完整对应源码制品 `ffmpeg-corresponding-source.zip` 与应用放在同一个 Release，包含 FFmpeg、x264、nv-codec-headers 的固定源码和构建脚本。发行构建会校验工具及对应源码，任何一项缺失或哈希不符都停止打包。
+工具以独立进程调用，按 GPL-3.0-or-later 分发；工具目录包含许可证、构建配置、来源清单和 SHA-256。完整对应源码制品 `ffmpeg-corresponding-source.zip` 与应用放在同一个 Release，包含 FFmpeg、x264、dav1d、nv-codec-headers、AMF 头文件与 libvpl 的固定源码和构建脚本。发行构建会校验工具及对应源码，任何一项缺失或哈希不符都停止打包。
 
 源码运行可将 FFmpeg、ffprobe 加入 PATH，或放在数据目录的 `tools\ffmpeg\bin`。显式指定的 `PEACH_FFMPEG`、`PEACH_FFPROBE` 优先；独立包随后使用随包工具，再查数据目录和 PATH。
 
@@ -80,6 +82,10 @@ Windows 第一次询问防火墙权限时，只勾选「专用网络」。
 - 连接失败时，检查防火墙或代理是否允许 cloudflared 出站访问 TCP/UDP `7844` 端口。页面上出现了随机地址，不代表连接已经成功。
 
 ## 采集来源
+
+Windows 完整安装包、免安装包、轻量安装包与应用更新包均随附锁文件固定版本的 amane 独立 console 桥，使用者无需安装 Python、uv 或 Git。运行目录位于程序资源中的 `_internal\tools\amane-runtime`；桥属于应用必需资源，不随可选媒体工具拆分。macOS 独立应用在 `Contents/Frameworks/tools/amane-runtime` 携带对应架构的桥，数据资源通过应用内链接映射到 `Contents/Resources`。
+
+桌面构建调用 `scripts/build_amane_runtime.py`，按桥的 `uv.lock` 安装独立构建环境，再复用主锁固定的 PyInstaller 生成运行目录。构建会执行 `--self-check`，离线载入运行时与全部 Peach 开放站点类；站点连接检查仍需实际网络。目录中的 `manifest.json` 记录版本、完整 revision 和可执行文件相对路径。GPL-3.0 许可证、来源说明、amane 完整对应源码，以及 zhconv 和 certifi 的固定源码随运行目录一起分发。
 
 1. 扫描完成后，打开「数据管理」页，在「扫描与采集」卡片上点「来源和凭证」。
 2. 每个来源可以选连接方式：「Peach 代理」或「直接连接」。高清来源通常需要代理；「Peach 代理」用的是配置页「网络与访问 → Peach 代理」里的设置（系统代理、直连或自定义地址，系统代理不支持 PAC）。

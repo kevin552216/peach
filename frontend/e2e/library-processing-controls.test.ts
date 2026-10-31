@@ -141,7 +141,8 @@ describe('扫描与采集控制', () => {
         await card.getByRole('button', { name: '更多同步方式', exact: true }).click();
         const menu = page.getByRole('dialog', { name: '同步方式', exact: true });
         assert.equal(await menu.locator('svg').count(), 0);
-        assert.equal(await menu.getByRole('button').count(), 7);
+        await menu.getByRole('button', { name: '自选工作项目', exact: true }).waitFor();
+        assert.equal(await menu.getByRole('button').count(), 8);
         assert.equal(await menu.getByRole('group', { name: '日常同步', exact: true }).getByRole('button').count(), 2);
         assert.equal(await menu.getByRole('group', { name: '全库维护', exact: true }).getByRole('button').count(), 5);
         for (const label of ['仅发现新增文件', '补全待处理影片', '同步整个媒体库', '仅扫描文件', '补全资料与预览', '仅补全影片资料', '仅补全预览图']) {

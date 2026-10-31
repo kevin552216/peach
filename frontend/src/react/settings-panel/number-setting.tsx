@@ -14,6 +14,8 @@ export const NUMBER_SPECS = {
   hoverDelaySetting: { min: 1, max: 60, unit: '秒', optional: true, fallback: 5 },
   seekSecondsSetting: { min: 1, max: 300, unit: '秒', fallback: 10 },
   relatedLimitSetting: { min: 1, max: 60, unit: '个', optional: true, fallback: 20 },
+  /* 上限跟 `/api/feeds/discoveries` 一致，服务端多于 100 也只回 100 部。 */
+  feedLimitSetting: { min: 1, max: 100, unit: '部', fallback: 12 },
   searchHistoryLimitSetting: { min: 1, max: 50, unit: '条', optional: true, fallback: 10 },
   followScheduleSetting: { min: 15, max: 10080, unit: '分钟', optional: true, fallback: 60 },
 } as const satisfies Record<string, NumberSpec>;

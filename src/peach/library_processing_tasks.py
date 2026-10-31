@@ -13,17 +13,28 @@ from pathlib import Path
 from filelock import FileLock
 
 from . import library_processing as engine
-from .jobs import DiskGuard, JobPaused
+from .jobs import DiskGuard, JobPaused, JobCancelled as ProcessingStopped
 from .media_processing_policy import metadata_only
-from .processing_control import (ProcessingStopped, bind_control, checkpoint, initial_estimate,
-                                 resume_fields, task_control)
+from .processing_control import (bind_control, checkpoint, initial_estimate,
+                                 resume_fields, task_control, processing_item, ItemSkipped)
 from .review_csv import read_rows, write_rows
 from .update_tasks import activity
 
 TASKS = ('scan', 'probe', 'metadata', 'covers', 'previews')
 LABELS = dict(scan='扫描文件', probe='读取媒体属性', metadata='采集缺失资料', covers='补全封面', previews='生成视频预览')
-DEFAULTS = dict(all=TASKS, collect=TASKS[1:], scan=('scan', 'probe'),
+DEFAULTS = dict(all=TASKS, collect=TASKS[1:], scan=('scan',),
                 metadata=('metadata', 'covers'), previews=('previews',), probe=('probe',), covers=('covers',))
+
+
+def requested_selection(config, stage, tasks, asset_ids, execution_mode, defer_suspected_duplicates, incremental):
+    """每趟独立工作表与增量同步使用各自的范围契约。"""
+    if (tasks is None and execution_mode == 'sequential'
+            and stage not in ('probe', 'covers')):
+        return None
+    if incremental:
+        raise ValueError('自选工作项请使用整库或所选影片范围')
+    return selection_for(config, stage, tasks, asset_ids, execution_mode, defer_suspected_duplicates)
+
 
 
 def selection_for(config, stage, tasks, asset_ids, execution_mode='sequential', defer_suspected_duplicates=False):
@@ -94,7 +105,7 @@ class SelectedProcessing:
         self.state = self.initial_state()
         previous = options.get('resume_state') or {}
         engine._restore_processing_counts(self.state, previous)
-        self.checkpoints = engine._LibraryCheckpoints(self.state, previous, self.database)
+        self.checkpoints = engine._LibraryCheckpoints(self.state, previous, self.database, self.db)
         self.log = engine._processing_issue_log(config, self.path, self.identity,
             options.get('state_file') is not None, resume=bool(previous))
         self.state['issues_log'] = str(self.log)
@@ -121,7 +132,7 @@ class SelectedProcessing:
         with self.lock:
             task = getattr(self.local, 'task', None)
             if getattr(self.local, 'pipeline', False) and task in self.local.unit_done:
-                values.update(checked=self.local.unit_done[task], total=len(self.rows))
+                values.update(checked=self.local.unit_done[task], total=self.task_total(task))
             resume_fields(self.state, values)
             self.state.update(values)
             self.state['speed_mode'] = self.control.mode if self.control else self.mode
@@ -197,7 +208,7 @@ class SelectedProcessing:
         self.local.task = task
         try:
             self.task_state(task, 'running')
-            self.update(stage=LABELS[task], checked=0, total=len(self.rows))
+            self.update(stage=LABELS[task], checked=0, total=self.task_total(task))
             if row is None:
                 getattr(self, 'do_' + task)()
                 self.task_state(task, 'complete')
@@ -206,7 +217,7 @@ class SelectedProcessing:
         except Exception as error:
             with self.lock:
                 self.errors.append(error)
-                stopped = isinstance(error, ProcessingStopped) or self.control is not None and self.control.stopped
+                stopped = isinstance(error, ProcessingStopped) or self.control is not None and self.control.cancelled
                 progress = self.state['work_progress'][task]
                 progress['status'] = 'cancelled' if stopped else 'failed'
                 progress['failed'] += int(not stopped and not isinstance(error, JobPaused))
@@ -232,6 +243,9 @@ class SelectedProcessing:
         with self.lock:
             for task, total in self.pending.items():
                 self.state['work_progress'][task]['total'] = total
+
+    def task_total(self, task):
+        return len(self.rows)
 
     def run(self):
         with (activity(self.db, 'library-processing'),
@@ -294,6 +308,7 @@ class SelectedProcessing:
         summary['auto_rejected'] = summary.get('auto_rejected', 0) + self.state['auto_rejected']
         self.publish(**summary)
 
+
     def lane(self, tasks):
         for task in tasks:
             if self.cancel.is_set():
@@ -331,7 +346,7 @@ class SelectedProcessing:
         if isinstance(error, JobPaused):
             self.publish(waiting_for_update=True, stage='等待安装完成后继续')
             raise error
-        cancelled = isinstance(error, ProcessingStopped) or self.control is not None and self.control.stopped
+        cancelled = isinstance(error, ProcessingStopped) or self.control is not None and self.control.cancelled
         if self.control is not None and self.control.paused and not cancelled:
             with self.lock:
                 for progress in self.state['work_progress'].values():
@@ -380,7 +395,7 @@ class SelectedProcessing:
         rows = self.current_rows() if rows is None else rows
         for row in rows:
             self.update(current_asset_id=row['id'], current_asset_name=row['name'])
-            code = engine._provider_code(row['code']) or engine.release_code_from_filename(row['name'])
+            code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             video = engine.translate_ledger_path(row['path'])
             _, posters = listing.sidecars(video)
             poster_root = self.cover_root if code else self.config.directory('generated') / 'posters'
@@ -389,8 +404,16 @@ class SelectedProcessing:
         engine._read_local_posters(jobs, self.state, update=self.update, issue=self.issue)
         for index, row in enumerate(rows):
             self.update(stage='补全封面', checked=index, total=len(rows))
-            code = engine._provider_code(row['code']) or engine.release_code_from_filename(row['name'])
-            _, covers = self.get_remote().collect(row, code, [], self.cover_root, update=self.update, issue=self.issue)
+            if 'cover' not in engine._library_stages(self.config)(row['path']):
+                continue
+            code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
+            try:
+                with processing_item(row['id']):
+                    _, covers = self.get_remote().collect(row, code, [], self.cover_root, update=self.update, issue=self.issue)
+            except ItemSkipped:
+                self.get_remote().reset()
+                self.issue(row, '已跳过这部影片，可在任务结束后重试', action='skipped', retryable=True)
+                continue
             self.covered.append((row['id'], covers))
             self.publish(covers=self.state['covers'] + covers, checked=index + 1)
 
@@ -413,7 +436,7 @@ class SelectedProcessing:
         chosen = []
         deferred = list(self.state['deferred_asset_ids']) if streaming else []
         for row in rows:
-            code = engine._provider_code(row['code']) or engine.release_code_from_filename(row['name'])
+            code = engine._provider_code(row['code']) or self.directory_index.code_from_filename(row['name'])
             duration, size = row.get('duration'), row.get('size')
             key = (code, size, round(duration, 1)) if code and size and duration and duration > 0 else None
             if key is not None and key in seen and not self.has_preview(row):
@@ -513,13 +536,36 @@ class MetadataWork:
                 runner.publish(checked=index + 1)
             self.flush(force=True)
             for index, local in enumerate(prepared):
-                row = local[0]
                 runner.update(stage='采集缺失资料', checked=index, total=len(prepared),
-                              current_asset_id=row['id'], current_asset_name=row['name'])
+                              current_asset_id=local[0]['id'], current_asset_name=local[0]['name'])
                 self.collect(local)
                 runner.publish(checked=index + 1, candidates=len(engine._candidate_scope(self.groups, runner.scope)))
         finally:
             self.flush(force=True)
+
+
+    def collect(self, prepared):
+        runner = self.runner
+        row, code, fields, entries, verify_existing, local_ok = prepared
+        if 'metadata' not in engine._library_stages(runner.config)(row['path']):
+            return
+        issues = runner.state['work_progress']['metadata']['failed']
+        missing = list(engine.COLLECTED_FIELDS) if verify_existing else engine._missing_fields(row, fields)
+        try:
+            with processing_item(row['id']):
+                found, _ = runner.get_remote().collect( row, code, missing, runner.cover_root,
+                    update=runner.update, issue=runner.issue, fetch_cover=False,
+                    answered=() if verify_existing else engine._answered_sources(self.groups, f"asset:{row['id']}", missing),
+                    received=lambda entries: self.publish(row, code, fields, entries, verify_existing))
+        except ItemSkipped:
+            runner.get_remote().reset()
+            runner.issue(row, '已跳过这部影片，可在任务结束后重试', action='skipped', retryable=True)
+            return
+        with runner.lock:
+            runner.checkpoints.queue_metadata(row, entries + found if local_ok else [], issues,
+                issue_count=runner.state['work_progress']['metadata']['failed'])
+        self.flush()
+
 
     def run_ready(self, row):
         """本档资料就绪即交接封面，候选仍按既有节流与检查点持久保存。"""
@@ -531,18 +577,8 @@ class MetadataWork:
         if prepared is not None:
             runner.update(stage='采集缺失资料')
             self.collect(prepared)
-        runner.publish(candidates=len(engine._candidate_scope(self.groups, runner.scope)))
+        runner.publish(candidates=self.candidate_count())
 
-    def collect(self, prepared):
-        runner = self.runner
-        row, code, fields, entries, verify_existing, local_ok = prepared
-        issues = runner.state['work_progress']['metadata']['failed']
-        missing = list(engine.COLLECTED_FIELDS) if verify_existing else engine._missing_fields(row, fields)
-        found, _ = runner.get_remote().collect(row, code, missing, runner.cover_root,
-            update=runner.update, issue=runner.issue, include_covers=False,
-            answered=() if verify_existing else engine._answered_sources(self.groups, f"asset:{row['id']}", missing),
-            received=lambda entries: self.publish(row, code, fields, entries, verify_existing))
-        with runner.lock:
-            runner.checkpoints.queue_metadata(row, entries + found if local_ok else [], issues,
-                issue_count=runner.state['work_progress']['metadata']['failed'])
-        self.flush()
+
+    def candidate_count(self):
+        return len(engine._candidate_scope(self.groups, self.runner.scope))

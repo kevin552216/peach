@@ -18,7 +18,7 @@ describe('可调整的新任务', () => {
           if (route.request().method() === 'POST') {
             const body = route.request().postDataJSON();
             writes.push(body);
-            state = body.action === 'stop' ? { ...state, status: 'cancelled' }
+            state = body.action === 'cancel' ? { ...state, status: 'cancelled' }
               : { ...state, status: 'running', job_id: `new-${writes.length}`, requested_tasks: body.tasks,
                 execution_mode: body.execution_mode, speed_mode: body.speed_mode,
                 work_progress: Object.fromEntries(body.tasks.map((task: string) => [task,
@@ -32,13 +32,13 @@ describe('可调整的新任务', () => {
         const card = page.getByRole('region', { name: '扫描与采集', exact: true });
         const stop = async () => {
           await card.getByRole('button', { name: '停止任务', exact: true }).click();
-          await page.getByRole('dialog', { name: '停止扫描与采集', exact: true })
-            .getByRole('button', { name: '停止任务', exact: true }).click();
-          await card.getByRole('button', { name: '同步媒体库', exact: true }).waitFor({ state: 'visible' });
-          await page.getByText('已停止扫描与采集', { exact: true }).waitFor();
+          await card.getByRole('button', { name: '同步新增文件', exact: true }).waitFor({ state: 'visible' });
+          await page.getByText('任务已停止', { exact: true }).waitFor();
         };
         await stop();
-        await card.getByRole('button', { name: '同步媒体库', exact: true }).click();
+        await card.getByRole('button', { name: '更多同步方式', exact: true }).click();
+        await page.getByRole('dialog', { name: '同步方式', exact: true })
+          .getByRole('button', { name: '自选工作项目', exact: true }).click();
         const dialog = page.getByRole('dialog', { name: '新任务', exact: true });
         await dialog.waitFor();
         assert.equal(await dialog.getByRole('checkbox', { name: '生成视频预览', exact: true }).isChecked(), false);
@@ -52,9 +52,15 @@ describe('可调整的新任务', () => {
         await stop();
         await card.getByRole('button', { name: '更多同步方式', exact: true }).click();
         await page.getByRole('dialog', { name: '同步方式', exact: true })
-          .getByRole('button', { name: '仅生成视频预览', exact: true }).click();
+          .getByRole('button', { name: '自选工作项目', exact: true }).click();
         await dialog.waitFor();
-        assert.equal(await dialog.getByRole('radio', { name: '低占用', exact: true }).isChecked(), true);
+        for (const name of ['更新文件清单', '读取媒体属性', '补齐影片资料']) {
+          if (await dialog.getByRole('checkbox', { name, exact: true }).isChecked()) {
+            await dialog.getByText(name, { exact: true }).click();
+          }
+        }
+        await dialog.getByText('生成视频预览', { exact: true }).click();
+        await dialog.getByRole('radio', { name: '低占用', exact: true }).check();
         await dialog.getByRole('radio', { name: '就绪即处理', exact: true }).check();
         await dialog.getByText('只补缺失项目，已有结果保留。更新清单后，逐档衔接属性与预览、资料与封面，不必等待整批前置工作。', { exact: true }).waitFor();
         await dialog.getByText('暂缓疑似重复项的预览', { exact: true }).click();

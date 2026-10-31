@@ -6,7 +6,7 @@ import { RiCloseLine, RiUserLine } from '@remixicon/react';
 import { useMutation } from '@tanstack/react-query';
 import {
   createColumnHelper, createPaginatedRowModel, createSortedRowModel, flexRender,
-  rowPaginationFeature, rowSelectionFeature, rowSortingFeature, tableFeatures, useTable,
+  rowPaginationFeature, rowSelectionFeature, rowSortingFeature, columnVisibilityFeature, tableFeatures, useTable,
   type RowSelectionState, type SortingState,
 } from '@tanstack/react-table';
 import { confirmModal } from '@peach/legacy/ui';
@@ -21,11 +21,13 @@ import {
 import { errorMessage } from '../../api';
 import { cardClass } from '../components/card';
 import { DataTableFrame } from '../components/data-table-frame';
+import { useTablePreferences } from '../components/table-column-preferences';
+import { TableColumnControls, TableColumnResizer } from '../components/table-column-controls';
 import { DataTableFooter, DataTableSort } from '../components/table-controls';
 import { SelectionDock } from '../components/selection-dock';
 import { useTableSelection } from '../components/use-table-selection';
 import { ChevronSortDown } from '@/components/foundations/icons/chevrons';
-import { EmptyState } from '../components/empty-state';
+import { EmptyState, EmptyFocusButton } from '../components/empty-state';
 import { ErrorText, FieldLabel } from '../settings/section';
 import { busyProps } from '../settings/use-action';
 import {
@@ -33,11 +35,18 @@ import {
   type AliasGroup, type AliasSuggestion, type FollowSource,
 } from './follow-manage';
 import { AuthorAvatar } from './source-view';
+import { AliasRenameDialog } from './alias-rename-dialog';
+import { TableSelectionHeader } from '../components/table-selection-header';
 
 const REMOVE_BODY = (alias: string) => `将移除别名「${alias}」，对应来源恢复为独立创作者组。`;
-const suggestionFeatures = tableFeatures({ rowSelectionFeature, rowSortingFeature, rowPaginationFeature,
+const suggestionFeatures = tableFeatures({ rowSelectionFeature, rowSortingFeature, rowPaginationFeature, columnVisibilityFeature,
   sortedRowModel: createSortedRowModel(), paginatedRowModel: createPaginatedRowModel() });
 const savedFeatures = suggestionFeatures;
+const selectColumn = { id: 'select', label: '选择', width: 48, min: 48, max: 48, required: true };
+const identityColumn = { id: 'canonical', label: '统一名称', width: 280, min: 240, required: true, flex: true };
+const suggestionPreferences = [selectColumn, identityColumn, { id: 'alias', label: '平台别名', width: 240 },
+  { id: 'evidence', label: '依据', width: 320 }, { id: 'actions', label: '操作', width: 112 }];
+const savedPreferences = [selectColumn, identityColumn, { id: 'aliases', label: '平台别名', width: 400 }, { id: 'actions', label: '操作', width: 184, min: 168 }];
 
 export interface AliasManagerProps {
   groups: AliasGroup[];
@@ -70,6 +79,9 @@ function AuthorIdentity({ sources, name, canonicalKey }: {
 }
 
 export function AliasManager({ groups, suggestions, sources = [], readOnly, toast }: AliasManagerProps) {
+  const suggestionView = useTablePreferences('alias-suggestions', suggestionPreferences);
+  const savedView = useTablePreferences('alias-saved', savedPreferences);
+  const [renaming, setRenaming] = useState<AliasGroup | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [savedSelection, setSavedSelection] = useState<RowSelectionState>({});
   const activateSuggestion = useTableSelection(() => setRowSelection({}));
@@ -153,9 +165,9 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
     onConfirm: () => drop.mutateAsync(name),
   });
   const handlers = useRef({ sources, readOnly, merging: merge.isPending,
-    removing: drop.isPending, merge: mergeSome, remove: removeSome });
+    removing: drop.isPending, merge: mergeSome, remove: removeSome, rename: setRenaming });
   handlers.current = { sources, readOnly, merging: merge.isPending,
-    removing: drop.isPending, merge: mergeSome, remove: removeSome };
+    removing: drop.isPending, merge: mergeSome, remove: removeSome, rename: setRenaming };
 
   const suggestionColumns = useMemo(() => {
     const column = createColumnHelper<typeof suggestionFeatures, AliasSuggestion>();
@@ -163,10 +175,7 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
       column.display({
         id: 'select',
         header: (context) => (
-          <Checkbox slot={null} isSelected={context.table.getIsAllRowsSelected()}
-            isIndeterminate={context.table.getSelectedRowModel().rows.length > 0 && !context.table.getIsAllRowsSelected()}
-            aria-label="全选待合并别名"
-            onChange={(on) => context.table.toggleAllRowsSelected(on)} />
+          <TableSelectionHeader table={context.table} label="全选待合并别名" />
         ),
         cell: (context) => (
           <Checkbox slot={null} isSelected={context.row.getIsSelected()}
@@ -175,7 +184,7 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
         ),
       }),
       column.accessor('canonical', {
-        header: '规范创作者',
+        header: '统一名称',
         cell: (context) => <AuthorIdentity sources={handlers.current.sources} name={context.getValue()} />,
       }),
       column.accessor('alias', { header: '平台别名', cell: (context) => context.getValue() }),
@@ -197,14 +206,13 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
     const column = createColumnHelper<typeof savedFeatures, AliasGroup>();
     return column.columns([
       column.display({ id: 'select', header: ({ table }) => (
-        <Checkbox slot={null} aria-label="全选已保存别名" isSelected={table.getIsAllRowsSelected()}
-          isIndeterminate={table.getIsSomeRowsSelected()} onChange={(on) => table.toggleAllRowsSelected(on)} />
+        <TableSelectionHeader table={table} label="全选已保存别名" />
       ), cell: ({ row }) => (
         <Checkbox slot={null} aria-label={`选择已保存别名 ${row.original.canonical_name}`}
           isSelected={row.getIsSelected()} onChange={(on) => row.toggleSelected(on)} />
       ) }),
       column.accessor('canonical_name', {
-        id: 'canonical', header: '规范创作者',
+        id: 'canonical', header: '统一名称',
         cell: (context) => (
           <AuthorIdentity sources={handlers.current.sources} name={context.getValue()}
             canonicalKey={context.row.original.canonical_key} />
@@ -228,6 +236,9 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
           </span>
         ),
       }),
+      column.display({ id: 'actions', header: '操作', cell: ({ row }) => <Button variant="secondary" size="small"
+        disabled={handlers.current.readOnly} aria-label={`修改 ${row.original.canonical_name} 的统一名称`}
+        onClick={() => handlers.current.rename(row.original)}>修改统一名称</Button> }),
     ]);
   }, []);
   const suggestionTable = useTable({
@@ -235,7 +246,8 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
     data: suggestions,
     columns: suggestionColumns,
     getRowId: suggestionKey,
-    state: { rowSelection, sorting, pagination: suggestionPage },
+    state: { rowSelection, sorting, pagination: suggestionPage, columnVisibility: suggestionView.visibility },
+    onColumnVisibilityChange: suggestionView.change,
     onRowSelectionChange: (next) => { activateSuggestion(); setRowSelection(next); },
     onSortingChange: (next) => { setSorting(next); setPagination((now) => ({ ...now, pageIndex: 0 })); },
     onPaginationChange: setPagination,
@@ -246,7 +258,8 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
     data: groups,
     columns: savedColumns,
     getRowId: (group) => group.canonical_key,
-    state: { rowSelection: savedSelection, sorting: savedSorting, pagination: savedPage },
+    state: { rowSelection: savedSelection, sorting: savedSorting, pagination: savedPage, columnVisibility: savedView.visibility },
+    onColumnVisibilityChange: savedView.change,
     onRowSelectionChange: (next) => { activateSaved(); setSavedSelection(next); }, enableRowSelection: true,
     onSortingChange: (next) => { setSavedSorting(next); setSavedPagination((now) => ({ ...now, pageIndex: 0 })); },
     onPaginationChange: setSavedPagination,
@@ -262,7 +275,7 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
       <div className="flex flex-col gap-2">
         <FieldLabel>手动添加别名</FieldLabel>
         <div className="flex flex-wrap items-end gap-2">
-          <Input aria-label="规范创作者名" placeholder="规范创作者名" value={canonical}
+          <Input aria-label="统一名称" placeholder="在 Peach 中统一显示的名称" value={canonical}
             onChange={setCanonical} isDisabled={readOnly} className="w-56" />
           <Input aria-label="平台别名" placeholder="平台别名" value={alias}
             onChange={setAlias} isDisabled={readOnly} className="w-56" />
@@ -278,42 +291,49 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
 
       {suggestions.length ? (
         <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div data-responsive-toolbar="">
+            <div data-toolbar-heading="">
             <FieldLabel>待合并</FieldLabel>
-            <span className="mr-auto text-body-2-regular text-text-secondary">
+            <span className="text-body-2-regular text-text-secondary">
               {`${suggestions.length} 组`}
             </span>
+            </div>
+            <div data-toolbar-actions="">
             <Button variant="primary" size="small" disabled={readOnly} {...busy}
               onClick={() => mergeSome(suggestions, true)}>{`全部合并（${suggestions.length}）`}</Button>
             <DataTableSort label="待合并创作者别名" sorting={sorting}
-              options={[{ id: 'canonical', label: '规范创作者' }, { id: 'alias', label: '平台别名' }, { id: 'evidence', label: '依据' }]}
+              options={[{ id: 'canonical', label: '统一名称' }, { id: 'alias', label: '平台别名' }, { id: 'evidence', label: '依据' }]}
               onChange={(next) => { setSorting(next); setPagination((now) => ({ ...now, pageIndex: 0 })); }} />
+            <TableColumnControls preferences={suggestionView} label="待合并创作者别名" />
+            </div>
           </div>
           <SelectionDock label="待合并别名批量操作" visible={chosen.length > 0} count={`已选 ${chosen.length} 组`}>
             <Button variant="secondary" size="small" disabled={readOnly} {...busy}
               onClick={() => mergeSome(chosen, false)}>{`合并所选（${chosen.length}）`}</Button>
             <Button variant="ghost" size="small" onClick={() => setRowSelection({})}>取消选择</Button>
           </SelectionDock>
-          <DataTableFrame follow>
+          <DataTableFrame follow preferences={suggestionView} onRowClick={id => suggestionTable.getRow(id)?.toggleSelected()}>
             <Table aria-label="待合并创作者别名" size="sm"
               sortDescriptor={sorting[0] ? { column: sorting[0].id, direction: sorting[0].desc ? 'descending' : 'ascending' } : undefined}
               onSortChange={(sort) => suggestionTable.getColumn(String(sort.column))?.toggleSorting(sort.direction === 'descending')}>
             <TableHeader>
               {suggestionTable.getHeaderGroups()[0]!.headers.map((header) => (
-                <TableColumn key={header.id} id={header.id} isRowHeader={header.column.id === 'alias'} allowsSorting={header.column.getCanSort()}>
-                  {({ sortDirection }) => <span className="flex items-center gap-0.5">
+                <TableColumn key={header.id} id={header.id} isRowHeader={header.column.id === 'canonical'} allowsSorting={header.column.getCanSort()} {...suggestionView.columnProps(header.id)}>
+                  {({ sortDirection }) => <><span className="flex items-center gap-0.5">
                     {flexRender(header.column.columnDef.header, header.getContext())}
                     {header.column.getCanSort() ? <span data-sort-indicator data-direction={sortDirection || undefined}><ChevronSortDown /></span> : null}
-                  </span>}
+                  </span><TableColumnResizer preferences={suggestionView} id={header.id} /></>}
                 </TableColumn>
               ))}
+              <TableColumn id="remaining-space" aria-label="行空白区域" data-table-space="" width={suggestionView.spaceWidth} minWidth={0} />
             </TableHeader>
             <TableBody>
               {suggestionTable.getRowModel().rows.map((row) => (
                 <TableRow key={row.id} id={row.id} data-board-selected={row.getIsSelected() || undefined}>
-                  {row.getAllCells().map((cell) => (
+                  {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
+                  <TableCell data-table-space="" />
                 </TableRow>
               ))}
             </TableBody>
@@ -324,12 +344,17 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
       ) : null}
 
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
+        <div data-responsive-toolbar="">
+          <div data-toolbar-heading="">
           <FieldLabel>已保存别名</FieldLabel>
-          <span className="mr-auto text-body-2-regular text-text-secondary">{`${groups.length} 组`}</span>
+          <span className="text-body-2-regular text-text-secondary">{`${groups.length} 组`}</span>
+          </div>
+          <div data-toolbar-actions="">
           <DataTableSort label="已保存创作者别名" sorting={savedSorting}
-            options={[{ id: 'canonical', label: '规范创作者' }, { id: 'aliases', label: '平台别名' }]}
+            options={[{ id: 'canonical', label: '统一名称' }, { id: 'aliases', label: '平台别名' }]}
             onChange={(next) => { setSavedSorting(next); setSavedPagination((now) => ({ ...now, pageIndex: 0 })); }} />
+          <TableColumnControls preferences={savedView} label="已保存创作者别名" />
+          </div>
         </div>
         <SelectionDock label="已保存别名批量操作" visible={savedNames.length > 0} count={`已选 ${savedNames.length} 个别名`}>
           <Button variant="secondary" size="small" disabled={readOnly} {...busyProps(drop.isPending)}
@@ -343,26 +368,28 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
         </SelectionDock>
         {groups.length ? (
           <>
-          <DataTableFrame follow>
+          <DataTableFrame follow preferences={savedView} onRowClick={id => savedTable.getRow(id)?.toggleSelected()}>
             <Table aria-label="已保存创作者别名" size="sm"
               sortDescriptor={savedSorting[0] ? { column: savedSorting[0].id, direction: savedSorting[0].desc ? 'descending' : 'ascending' } : undefined}
               onSortChange={(sort) => savedTable.getColumn(String(sort.column))?.toggleSorting(sort.direction === 'descending')}>
             <TableHeader>
               {savedTable.getHeaderGroups()[0]!.headers.map((header) => (
-                <TableColumn key={header.id} id={header.id} isRowHeader={header.column.id === 'canonical'} allowsSorting={header.column.getCanSort()}>
-                  {({ sortDirection }) => <span className="flex items-center gap-0.5">
+                <TableColumn key={header.id} id={header.id} isRowHeader={header.column.id === 'canonical'} allowsSorting={header.column.getCanSort()} {...savedView.columnProps(header.id)}>
+                  {({ sortDirection }) => <><span className="flex items-center gap-0.5">
                     {flexRender(header.column.columnDef.header, header.getContext())}
                     {header.column.getCanSort() ? <span data-sort-indicator data-direction={sortDirection || undefined}><ChevronSortDown /></span> : null}
-                  </span>}
+                  </span><TableColumnResizer preferences={savedView} id={header.id} /></>}
                 </TableColumn>
               ))}
+              <TableColumn id="remaining-space" aria-label="行空白区域" data-table-space="" width={savedView.spaceWidth} minWidth={0} />
             </TableHeader>
             <TableBody>
               {savedTable.getRowModel().rows.map((row) => (
                 <TableRow key={row.id} id={row.id} data-board-selected={row.getIsSelected() || undefined}>
-                  {row.getAllCells().map((cell) => (
+                  {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
+                  <TableCell data-table-space="" />
                 </TableRow>
               ))}
             </TableBody>
@@ -371,11 +398,13 @@ export function AliasManager({ groups, suggestions, sources = [], readOnly, toas
           <DataTableFooter label="已保存创作者别名" unit="组" total={groups.length} pagination={savedPage} onChange={setSavedPagination} />
           </>
         ) : (
-          <EmptyState shell="plain" icon={RiUserLine} title="还没有保存创作者别名">
-            填写规范创作者名和平台别名以添加。
+          <EmptyState size="compact" icon={RiUserLine} title="还没有保存创作者别名"
+            actions={!readOnly ? <EmptyFocusButton target='input[aria-label="统一名称"]'>添加别名</EmptyFocusButton> : undefined}>
+            填写统一名称，以及该创作者在其他平台使用的名字。
           </EmptyState>
         )}
       </div>
+      <AliasRenameDialog group={renaming} close={() => setRenaming(null)} receipt={toast} />
     </div>
   );
 }

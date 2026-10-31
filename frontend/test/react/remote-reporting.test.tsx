@@ -16,7 +16,7 @@ describe('版本统计与错误诊断', () => {
     const receipt = vi.fn();
     const host = await mount(<RemoteReportingSettings initial={initial} receipt={receipt} />);
     expect(switches(host).map((node) => node.checked)).toEqual([false]);
-    expect(host.textContent).toContain('上传服务未配置。');
+    expect(host.textContent).toContain('上传服务未配置');
     expect(host.textContent).toContain('上传版本、系统信息、故障类型、代码位置与发生次数。');
     await click(switches(host)[0]!);
     await settle();

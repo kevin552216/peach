@@ -1,10 +1,13 @@
 # README 维护
 
+默认入口 `README.md` 使用英文，简体中文版为 `README.zh-CN.md`；两种语言同批核对。
+
 1. 按下表核对本次涉及的能力、安装方式与限制。
 2. 同批核对中英文 README，修改需要调整的内容，保留使用入口和安全说明。
-3. 按 [文档与界面文案](WRITING.md#检查与复核) 检查，再运行 [正式测试入口](TESTING.md#正式入口)。
+3. 用 documd 提供当前稿的可视化预览，取得用户明确确认后才能推送 README；继续修改时确认对应的新稿。
+4. 按 [文档与界面文案](WRITING.md#检查与复核) 检查，再运行 [正式测试入口](TESTING.md#正式入口)。
 
-README 面向初次访问项目的人，依次讲它是什么、介绍视频与截图、能做什么、怎么装、常见问题、
+README 面向初次访问项目的人，依次讲它是什么、界面导览与截图、能做什么、怎么装、常见问题、
 问题反馈和文档入口。用使用者的话写：说能做什么、会不会动文件，不写账本、候选、实体这类内部
 概念，内部机制与开发流程只留链接。中英文同批维护，平台支持、安装方式和能力限制保持一致。主线能力、已安装运行态和发行制品分别
 以实现、本机健康检查和 Releases 为准，README 不填写本机 IP、端口归属、真实馆藏数字或动态版本号。
@@ -24,8 +27,8 @@ README 迭代绑定 Codex 与 Claude 共用的工作树交付流程。每次提�
 | 判断 | 提交消息末尾的独立字段 |
 | --- | --- |
 | 已更新两份 README | `README-Impact: updated; 同步了哪些用户说明` |
-| 只需修改中文 README | `README-Impact: updated; 中文修改原因`，另加 `README-Reviewed: README.en.md; 英文无需修改的原因` |
-| 只需修改英文 README | `README-Impact: updated; 英文修改原因`，另加 `README-Reviewed: README.md; 中文无需修改的原因` |
+| 只需修改中文 README | `README-Impact: updated; 中文修改原因`，另加 `README-Reviewed: README.md; 英文无需修改的原因` |
+| 只需修改英文 README | `README-Impact: updated; 英文修改原因`，另加 `README-Reviewed: README.zh-CN.md; 中文无需修改的原因` |
 | 不影响 README | `README-Impact: none; 具体原因` |
 
 声明与 `Co-Authored-By` 等其它 trailer 连续写在提交消息末尾的同一块里，彼此之间不留空行。
@@ -40,7 +43,7 @@ README 改动必须核对两种语言；`updated` 至少对应一份实际差异
 仅一份需要调整时，用唯一 `README-Reviewed` 写明未改文件及原因，不能为了满足检查改动正确的译文。
 提交后的暂存内容不能满足要求。原因的真实性仍由代码审阅负责，脚本不代替语义判断。
 
-`agent_worktree.py ready/integrate` 在接受测试记录前执行这一门槛。检查覆盖本次分支交付，
+`agent_worktree.py preflight` 在耗时验证前核对这一门槛；`ready/integrate` 在接受测试记录前复用同一检查。检查覆盖本次分支交付，
 允许在最后交付提交统一核对整批差异。仓库 `scripts/githooks/commit-msg` 在 `agent/*`
 分支提交时检查署名，以及消息中已有 README 声明的格式与分段；中间提交可以不写 README 声明。
 合并消息免除署名检查，amend 使用同一套字段判据；钩子只读消息。README 声明与整个分支差异
@@ -53,11 +56,12 @@ README 改动必须核对两种语言；`updated` 至少对应一份实际差异
 README、教程与网站的截图默认取自演示库。用分类模型从真实馆藏里筛「看起来无害」的帧不算
 替代方案：筛出来的多是黑场与标题卡，卡片上的番号、姓名与厂牌照样泄露来源。
 
-逐段确认过的真实馆藏画面可以用，条件是画面里不出现访问凭据、局域网地址、隧道地址
-和文件系统完整路径；这四样一旦入镜就是把本机坐标发到公网，撤不回来。README 的介绍视频挂在 `intro-video` Release 的附件上；截图由官网静态资源提供 WebP 展示图与无损 PNG 原图，README 的图片链接指向 PNG，避免 Release 附件的下载响应。WebP 展示图须小于 4 MB，并核验 GitHub 图片代理返回图片且浏览器完整解码；高密度播放墙使用单独的压缩展示图，原图保持 3840×2160。截图不进仓库：`resources/` 会被整个打进安装包。仓库里确需
+公开 README 复用官网已发布的电影演示库截图，展示馆藏、人物、关注、统计与播放器；界面导览链接到官网 `#live`，仅嵌入已核对内容、来源和许可的视频。截图与文案明确区分演示数据、实际功能和影片访问权，保留来源的年龄、地区和访问限制，不把外部来源的访问权说成 Peach 提供的能力。展示素材的来源、署名与许可链接到官网[素材来源与许可](https://peach.video/credits/)，软件许可不替代第三方素材许可。项目定位与公开附件边界见[文档规范](WRITING.md#公开与私有记录)。
+
+公开画面不得出现访问凭据、局域网地址、隧道地址、文件系统完整路径或个人馆藏。截图由官网静态资源提供 WebP 展示图与无损 PNG 原图，README 的图片链接指向 PNG，避免 Release 附件的下载响应。WebP 展示图须小于 4 MB，并核验 GitHub 图片代理返回图片且浏览器完整解码；原图保持 3840×2160。更新链接时核对官网实际发布范围，不能只因本地文件存在就认为线上可用。截图不进仓库：`resources/` 会被整个打进安装包。仓库里确需
 留存的少量演示媒体放 `docs/assets/`，单个文件压到 8 MB 以内（`tests/test_repo_hygiene.py`）。
 
-生成器是 `scripts/demo_dataset.py`，只写目标目录，不碰任何账本：
+本地测试另有生成器 `scripts/demo_dataset.py`，只写目标目录，不碰任何账本；以下人像生成模式不作为当前公开 README 的素材来源：
 
 ```powershell
 & .\.venv\Scripts\python.exe -X utf8 scripts\demo_dataset.py --output <目录> --count 24
@@ -113,6 +117,5 @@ SHA-256 对不上是硬错误，不降级放行。
   使用条款，Peach 的边界以 AGPL 与 `SECURITY.md` 为准。
 - **演示素材**：README 里任何截图或视频都按上面「演示数据集」一节的边界取图，换素材时重新核对
   那几条边界。
-- **篇幅取舍（2026-10-17）**：复读已登记的 amane、Stash 与 OpenAver 原文，并核对线上 README。采用 amane 的短功能列表与安装入口，保留 Peach 的演示、全部五张截图、六条特色和必要安全说明；源码安装步骤集中在 [运行与配置](OPERATIONS.md#从源码运行windowsmacos)。路由、字段判据、缓存周期、更新包机制与开发流程由专题文档承载。
-- **截图与 Star 历史（2026-10-17）**：截图沿用 `a5f979d6^` 的双列表格，播放墙独占一行，五张 WebP 均链接 PNG 原图。Star History 依据官方 [`EmbedMarkdownSection.tsx`](https://github.com/star-history/star-history/blob/608d0e39be441665c01cd6ac1fd01ca5ec1eaf39/frontend/components/EmbedMarkdownSection.tsx) 使用 `/svg`，保留深浅主题并链接用户指定的交互页。实测 `/chart` 与 `/svg` 均返回 HTTP 200、SVG 类型及 `Cache-Control: public, s-maxage=86400, max-age=86400`；同版本 [`cache.ts`](https://github.com/star-history/star-history/blob/608d0e39be441665c01cd6ac1fd01ca5ec1eaf39/backend/cache.ts) 将数据与 SVG 缓存各设为 24 小时。交互页 URL 仅改变点击去向，不能保证嵌入图片即时刷新；README 不显示实时性承诺。
-- **交互图与嵌入图（2026-10-17）**：用户截图显示纵轴为 0、10、100；嵌入接口使用 `logscale` 得到相同刻度。官方同版本 [`StarChartViewer.tsx`](https://github.com/star-history/star-history/blob/608d0e39be441665c01cd6ac1fd01ca5ec1eaf39/frontend/components/StarChartViewer.tsx) 在浏览器调用 GitHub，并在页面内存中复用结果；24 小时服务端缓存针对嵌入图片接口，不能据此判断官网交互图的数据新鲜度。官网 `https://peach.video` 位于中英文 README 顶部导航。
+- **篇幅取舍（2026-10-27）**：参考 amane 的一行一功能与安装入口，以及 SakuraMedia 的主图与折叠截图。README 保留六条特色、安装表、文档导航和必要限制；参数、缓存、任务恢复、诊断与升级细节由专题文档承载。当前原文版本见 `docs/reference-sources.json`，不复制外部文案或使用条款。
+- **截图与 Star 历史（2026-10-27）**：五张电影演示库截图保留，首页主图直接展示，其余四张折叠；WebP 均链接 PNG 原图。Star History 由 `scripts/render_star_history.py` 按逐日记录生成，横轴从第一个 Star 开始，采用蜜桃色霓虹描边、线性绝对值坐标和深浅主题（2026-10-28 起取代 Star Chart 的周粒度图）。独立 GitHub Actions 每日生成 SVG，仅写入 `star-history` 分支，README 不承诺即时刷新；取数与取舍见 [复用记录](REUSE.md)。

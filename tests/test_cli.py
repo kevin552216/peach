@@ -18,7 +18,8 @@ from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 from peach import cli, onboarding, settings_file
-from peach.migrations import plan, upgrade
+from peach.migrations import plan
+from support.ledger import fresh_ledger
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "migrations"
@@ -36,14 +37,31 @@ def load_script(name: str):
 
 
 class StatusCommandTests(unittest.TestCase):
+    def test_configured_reader_can_inspect_pending_schema_but_cannot_migrate(self):
+        config = settings_file.load_config(environ={'PEACH_DATA_ROOT': str(self.root)})
+        database = config.directory('database') / 'ledger.db'
+        database.parent.mkdir()
+        sqlite3.connect(database).close()
+        before = database.read_bytes()
+        arguments = argparse.Namespace(db=database, action='status', yes=True)
+        with mock.patch.object(cli, '_require_readable_settings'), mock.patch.object(
+                settings_file, 'active', return_value=config), mock.patch(
+                'peach.runtime_prepare.configured_ledger_writer', return_value=(False, '读取端')), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(cli._migrate(arguments), 0)
+            arguments.action = 'upgrade'
+            with self.assertRaisesRegex(SystemExit, '写入端迁移并同步'):
+                cli._migrate(arguments)
+        self.assertEqual(database.read_bytes(), before)
+        self.assertEqual(list(database.parent.iterdir()), [database])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
-        self.db = self.root / "ledger.db"
+        self.db = fresh_ledger(self.root)
         self.shared = self.root / "shared" / "ledger.db"
         self.state = self.root / "state"
-        upgrade(self.db, MIGRATIONS)
         connection = sqlite3.connect(self.db)
         connection.executemany(
             "INSERT INTO asset(location,path,name,medium,size,duration,snapshot_path,"
@@ -128,8 +146,11 @@ class InitCommandTests(unittest.TestCase):
         self.assertIn("下一步", output)
         self.certs.assert_called_once()
 
-    def test_fresh_init_output_is_readable_by_the_settings_layer(self):
-        self._init("--mdns-name", "peach-two", "--port", "9443",
+    def test_declared_mount_output_is_readable_by_the_settings_layer(self):
+        self.root.mkdir()
+        (self.root / "config.toml").write_text(
+            "[media.locations]\nlocal = ['P:\\Library']\n", encoding="utf-8")
+        self._init("--force", "--mdns-name", "peach-two", "--port", "9443",
                    "--mount", "local=/mnt/media")
         loaded = settings_file.load_config(environ={"PEACH_DATA_ROOT": str(self.root)})
         self.assertTrue(loaded.present)
@@ -145,7 +166,7 @@ class InitCommandTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as caught:
             self._init("--mount", "locla=/mnt/media")
         self.assertIn("locla", str(caught.exception))
-        self.assertIn("local", str(caught.exception))
+        self.assertIn("尚未声明媒体来源", str(caught.exception))
 
     def test_mount_without_an_equals_sign_is_refused(self):
         with self.assertRaises(SystemExit) as caught:
@@ -376,6 +397,7 @@ class InteractiveInitTests(unittest.TestCase):
         self.addCleanup(active.stop)
         settings = PeachSettings(
             db_path=loaded.directory("database") / "ledger.db", configured=True, token="secret",
+            cover_root=loaded.directory("generated") / "covers",
             allowed_media_roots=translate_roots(tuple(root for roots in loaded.locations.values() for root in roots)),
         )
 
@@ -441,8 +463,7 @@ class InitDispatchTests(unittest.TestCase):
             self._run(["init", "--data-root", str(self.root), "--no-input", "--force"], tty=True), 0)
         self.interactive.assert_not_called()
         loaded = settings_file.load_config(environ={"PEACH_DATA_ROOT": str(self.root)})
-        # 非交互设置写出三个来源的默认数据库路径前缀。
-        self.assertEqual(set(loaded.locations), {"local", "115", "pikpak"})
+        self.assertEqual(loaded.locations, {})
 
 
 class ScanCommandTests(unittest.TestCase):
@@ -456,8 +477,7 @@ class ScanCommandTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
-        self.db = self.root / "ledger.db"
-        upgrade(self.db, MIGRATIONS)
+        self.db = fresh_ledger(self.root)
         self.media = self.root / "media"
         (self.media / "sub").mkdir(parents=True)
         (self.media / "sub" / "a.mp4").write_bytes(b"0")
@@ -528,8 +548,7 @@ class ProcessCommandTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.db = Path(self.tmp.name).resolve() / "ledger.db"
-        upgrade(self.db, MIGRATIONS)
+        self.db = fresh_ledger(self.tmp.name)
         config = settings_file.load_config(environ={}, strict=False)
         for target in (mock.patch.object(settings_file, "active", lambda: config),
                        mock.patch.object(cli, "SETTINGS_ERROR", None)):
@@ -568,6 +587,18 @@ class ProcessCommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(rows[0][3], "failed")
         self.assertEqual(rows[1][3], "pending")
+
+    def test_user_cancel_returns_a_cancelled_receipt_without_dispatching_followups(self):
+        from peach.jobs import JobCancelled
+        from contextlib import closing
+        with mock.patch('peach.library_processing.process_library',side_effect=JobCancelled('用户停止任务')), \
+                redirect_stdout(io.StringIO()) as output:
+            code=cli.main(['process','--db',str(self.db)])
+        with closing(sqlite3.connect(self.db)) as connection:
+            rows=connection.execute('SELECT status,parent_run_id FROM task_run').fetchall()
+        self.assertEqual(code,130)
+        self.assertEqual(rows,[('cancelled',None)])
+        self.assertIn('已保存结果保留',output.getvalue())
 
 
 class ReplicationAssemblyTests(unittest.TestCase):

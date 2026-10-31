@@ -10,12 +10,15 @@ import { apiGet, apiSend, errorMessage } from '../../api';
 import type { ReleaseState, UpdateJob } from '../bundle';
 import { Note } from '../components/note';
 import { Progress } from '../components/progress';
+import { StatusLabel } from '../components/status-label';
 import { ErrorText, ExternalLink, Fact, FactList, Footer, Help, Section, Stack } from './section';
 import { busyProps, useAction } from './use-action';
 
 const ACTIVE = new Set(['downloading', 'verifying', 'extracting', 'preparing', 'restarting', 'installing']);
 const STOPS = [65, 75, 90];
 const MAX_FAILURES = 120;
+/** 服务端没给发布页时的去处；检查到新版本后服务端给的是那一版自己的发布页。 */
+const RELEASES_URL = 'https://github.com/peach-mitao/peach/releases';
 
 export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState; initialJob?: UpdateJob | undefined }) {
   const [data, setData] = useState(initial);
@@ -86,12 +89,13 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
     ? `${((job.downloaded || 0) / 1048576).toFixed(1)} / ${(job.total / 1048576).toFixed(1)} MB`
     : `${job.progress}%`;
   return (
-    <Section title="检查更新">
+    <Section id="releaseUpdates" title="检查更新" aside={<StatusLabel tone={error || data.state === 'error' || job.state === 'error' ? 'error' : running ? 'progress' : data.state === 'available' ? 'warning' : data.state === 'unchecked' ? 'neutral' : 'success'}>
+      {error || data.state === 'error' || job.state === 'error' ? '检查未完成' : running ? '准备更新中' : job.state === 'ready' ? '可安装' : data.state === 'available' ? '有可用更新' : data.state === 'unchecked' ? '尚未检查' : '检查完成'}</StatusLabel>}>
       <FactList>
         <Fact term="当前版本">{data.current_version}</Fact>
         <Fact term="安装方式">{data.installation}</Fact>
         <Fact term="更新通道">{data.channel}</Fact>
-        <Fact term="最新版本">{data.latest_version || (data.state === 'unchecked' ? '尚未检查' : '未取得')}</Fact>
+        <Fact term="最新版本">{data.latest_version || '未取得'}</Fact>
         {data.package_kind ? <Fact term="下载内容">
           {data.package_kind === 'update' ? '应用更新包' : '应用与工具'}
           {data.asset_size ? ` · ${(data.asset_size / 1048576).toFixed(1)} MB` : ''}
@@ -100,7 +104,6 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
       {data.package_kind === 'update'
         ? <Help>应用更新包复用已安装工具；工具缺失、损坏或版本变化时会另行下载所需工具包。</Help>
         : data.package_kind === 'full' ? <Help>本次更新包含媒体工具。</Help> : null}
-      {/* 还没检查过时「最新版本」那一行已经写着「尚未检查」，下面不再说一遍。 */}
       {data.state === 'unchecked' && !data.checked_at && !error && job.state === 'idle' ? null : <Stack divided>
         {data.checked_at ? <Help>检查于 {new Date(data.checked_at * 1000).toLocaleString()}</Help> : null}
         {data.state === 'available' && !error
@@ -117,13 +120,17 @@ export function ReleaseUpdates({ initial, initialJob }: { initial: ReleaseState;
           </div>
         ) : null}
       </Stack>}
-      <Footer status={<ExternalLink href={data.release_url}>查看发布页</ExternalLink>}>
-        {job.state === 'ready' ? <Button onClick={confirmRestart}>重启安装</Button> : null}
-        {data.state === 'available' && data.installation === '独立测试包' && job.state !== 'ready'
-          ? <Button onClick={download} {...busyProps(running || action.busy === 'download')}>下载并安装</Button>
-          : null}
+      <Footer status={<div className="flex flex-wrap items-center gap-3">
+        <ExternalLink href="https://peach.video/#download">官网</ExternalLink>
+        <ExternalLink href="https://github.com/peach-mitao/peach">GitHub</ExternalLink>
+        <ExternalLink href={data.release_url || RELEASES_URL}>查看发布页</ExternalLink>
+      </div>}>
         <Button variant={job.state === 'ready' || (data.state === 'available' && data.installation === '独立测试包') ? 'secondary' : 'primary'}
           disabled={running} onClick={check} {...busyProps(action.busy === 'check')}>检查更新</Button>
+        {data.state === 'available' && data.installation === '独立测试包' && job.state !== 'ready'
+          ? <Button variant="primary" onClick={download} {...busyProps(running || action.busy === 'download')}>下载并安装</Button>
+          : null}
+        {job.state === 'ready' ? <Button variant="primary" onClick={confirmRestart}>重启安装</Button> : null}
       </Footer>
     </Section>
   );

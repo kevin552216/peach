@@ -151,6 +151,7 @@ describe('设计决定：数据管理、索引页与资料页头', () => {
     const opened = await visit(browser, '/data-cleanup', DESKTOP);
     try {
       const page = opened.page;
+      await page.locator('#link-manager-title').waitFor({ timeout: 15_000 });
       await page.locator('#link-manager .link-stat-grid b').first().waitFor({ timeout: 15_000 });
       await page.locator('#resource-sync-title').waitFor({ timeout: 15_000 });
       await settle(page);

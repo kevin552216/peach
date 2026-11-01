@@ -102,6 +102,8 @@ def resume_fields(state, values):
 
 
 def checkpoint(kind='work'):
+    from .task_control import checkpoint as task_checkpoint
+    task_checkpoint()
     control = CURRENT.get()
     if control is not None:
         control.checkpoint(kind)
@@ -163,11 +165,22 @@ class ActiveDeadline(float):
 
 
 def deadline_after(seconds):
-    value, control = time.monotonic() + seconds, CURRENT.get()
+    from .task_control import CURRENT as TASK_CONTROL
+    value, control = time.monotonic() + seconds, CURRENT.get() or TASK_CONTROL.get()
     return ActiveDeadline(value, control) if control is not None else value
 
 
 class ProcessingControl:
+    @property
+    def paused_seconds(self):
+        from .task_control import CURRENT as TASK_CONTROL
+        control = TASK_CONTROL.get() if CURRENT.get() is self else None
+        return self._paused_seconds + (control.paused_seconds if control is not None else 0.0)
+
+    @paused_seconds.setter
+    def paused_seconds(self, value):
+        self._paused_seconds = value
+
     def __init__(self, path):
         self.path = path
         self.lock = threading.RLock()
@@ -267,8 +280,13 @@ class ProcessingControl:
 
     def checkpoint(self, kind='work'):
         from .update_tasks import check_pause
+        from .task_control import CURRENT as TASK_CONTROL
+        task = TASK_CONTROL.get()
         started = None
+        generic_started = 0.0
         while True:
+            from .task_control import checkpoint as task_checkpoint
+            task_checkpoint()
             check_pause(self.db_path)
             self.refresh()
             self.check_item()
@@ -280,12 +298,14 @@ class ProcessingControl:
             if paused:
                 if started is None:
                     started = time.monotonic()
+                    generic_started = task.paused_seconds if task is not None else 0.0
                     self.publish(status='paused', speed_mode=mode)
                 self.event.wait(0.25)
                 continue
             if started is not None:
                 spent = time.monotonic() - started
-                self.paused_seconds += spent
+                generic_spent = task.paused_seconds - generic_started if task is not None else 0.0
+                self._paused_seconds += max(0.0, spent - generic_spent)
                 self.publish(status='running', speed_mode=mode, resumed_after=spent)
                 started = None
             # 控制只作用于当前馆藏任务；在单项 I/O 之间留出空档。

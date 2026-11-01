@@ -35,6 +35,7 @@ from .platform import is_unmapped, translate_ledger_path
 from .providers import ProviderUnavailable
 from .routes_auth import require_auth
 from .task_runs import task_label
+from .task_control import Cancelled as TaskCancelled
 from .taste_history import analyze_history, import_history_exports, write_manifest
 
 router = APIRouter()
@@ -248,6 +249,33 @@ def task_run_detail(request: Request, run_id: int,
         return JSONResponse({"error": str(exc.args[0])}, status_code=404)
 
 
+@router.post('/api/tasks/{run_id}/control')
+def task_run_control(request: Request, run_id: int, body: dict = Body(default_factory=dict),
+                     _args: dict[str, str] = Depends(require_auth)):
+    from . import task_control
+    contract = request.app.state.web_contract
+    try:
+        run = contract.task_runs.get(run_id)
+        if run is not None and run.active and run.task_key == 'library-processing':
+            from .web_library_processing import _current, w_library_processing
+            current = _current(contract)
+            if current.get('run_id') != run_id:
+                raise ValueError('任务已变化，请刷新后重试')
+            if not contract.task_runs.enabled or run.host != contract.task_runs.host:
+                raise PermissionError('请在执行这轮任务的写入端操作')
+            w_library_processing(contract, {'action': body.get('action'), 'job_id': current.get('job_id')})
+        else:
+            task_control.request(contract.task_runs, run_id, body.get('action'))
+        contract.followups.wake()
+        return web_tasks.q_task(contract, run_id)
+    except KeyError as exc:
+        return JSONResponse({'error': str(exc.args[0])}, status_code=404)
+    except PermissionError as exc:
+        return JSONResponse({'error': str(exc)}, status_code=403)
+    except ValueError as exc:
+        return JSONResponse({'error': str(exc)}, status_code=409)
+
+
 @router.post(push_discovery.WEBHOOK_PATH, status_code=204)
 def clouddrive_inbox(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
     """CloudDrive2 的文件变更通知。
@@ -330,6 +358,8 @@ def api_get(request: Request, route: str, args: dict[str, str] = Depends(require
         return payload
     except TaskRunConflict as exc:
         return _conflict(exc)
+    except TaskCancelled:
+        return JSONResponse({'error': '任务已取消，已保存的结果保留'}, status_code=409)
     except UpdateBusy as exc:
         return JSONResponse({'error': 'update in progress', 'message': str(exc)}, status_code=409)
     except FolderRuleConflict as exc:
@@ -370,6 +400,8 @@ def api_post(
     try:
         return web_contract.dispatch_api_post(
             request.app.state.web_contract, route_path, body)
+    except TaskCancelled:
+        return JSONResponse({'error': '任务已取消，已保存的结果保留'}, status_code=409)
     except TaskRunConflict as exc:
         return _conflict(exc)
     except UpdateBusy as exc:

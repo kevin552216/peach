@@ -16,7 +16,7 @@ from pathlib import Path
 
 from peach import web_contract, web_tasks
 from peach.jobs import BackgroundJob, TaskRunConflict
-from peach.routes_api import api_get, api_post, task_run_detail
+from peach.routes_api import api_get, api_post, task_run_detail, task_run_control
 from peach.repository import LedgerDatabase
 from peach.task_runs import TaskRunStore
 from support.ledger import fresh_ledger
@@ -502,7 +502,7 @@ class TasksEndpointTests(unittest.TestCase):
         """迁移是单独一步，升级后第一次打开活动页撞上这张表不存在是正常路径。"""
         bare = Path(self.tmp.name) / "bare.db"
         sqlite3.connect(bare).close()
-        contract = types.SimpleNamespace(task_runs=TaskRunStore(LedgerDatabase(bare)))
+        contract = web_contract.WebContract(bare)
         payload = web_tasks.q_tasks(contract, {})
         self.assertFalse(payload["available"])
         self.assertEqual(payload["running"], [])
@@ -562,6 +562,30 @@ class ConflictStatusTests(unittest.TestCase):
         self.assertEqual(task_run_detail(self.request, run.id, {})["run"]["id"], run.id)
         self.assertEqual(
             task_run_detail(self.request, run.id + 1000, {}).status_code, 404)
+
+    def test_control_endpoint_exposes_pending_pause_and_resumes_the_same_row(self):
+        parent = self.contract.task_runs.start('parent', trigger='manual')
+        child = self.contract.task_runs.enqueue_followups(parent.id, [('leaf:1', 'leaf', '子任务')])['queued'][0]
+        self.contract.task_runs.finish(parent.id, 'succeeded')
+        with unittest.mock.patch.object(self.contract.followups, 'wake') as wake:
+            paused = task_run_control(self.request, child, {'action': 'pause'}, {})
+            self.assertEqual(paused['run']['control'], {'state': 'paused', 'actions': ['resume', 'cancel']})
+            continued = task_run_control(self.request, child, {'action': 'resume'}, {})
+            self.assertEqual(continued['run']['id'], child)
+            self.assertEqual(continued['run']['control']['state'], 'running')
+            self.assertEqual(wake.call_count, 2)
+
+    def test_control_endpoint_rejects_unknown_finished_foreign_and_read_only_runs(self):
+        run = self.contract.task_runs.start('control-test', trigger='manual')
+        self.assertEqual(task_run_control(self.request, run.id + 1000, {'action': 'pause'}, {}).status_code, 404)
+        self.assertEqual(task_run_control(self.request, run.id, {'action': 'delete'}, {}).status_code, 409)
+        self.contract.task_runs.enabled = False
+        self.assertEqual(task_run_control(self.request, run.id, {'action': 'pause'}, {}).status_code, 403)
+        self.contract.task_runs.enabled = True
+        foreign = TaskRunStore(self.db, host='other-host').start('elsewhere', trigger='manual')
+        self.assertEqual(task_run_control(self.request, foreign.id, {'action': 'cancel'}, {}).status_code, 403)
+        self.contract.task_runs.finish(run.id, 'succeeded')
+        self.assertEqual(task_run_control(self.request, run.id, {'action': 'pause'}, {}).status_code, 409)
 
 
 if __name__ == "__main__":

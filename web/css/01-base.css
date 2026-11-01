@@ -173,7 +173,6 @@ html:has(.top :focus){scroll-padding-top:0}
 html::-webkit-scrollbar{display:none}
 /* 换筛选那一路上关掉滚动锚定：卡片换成骨架、骨架再换成新卡片，锚定每一步都要照新内容
    把位置推一次，而这一路正有一段回到顶部的滚动在走，两边会互相顶。 */
-html.refiltering{overflow-anchor:none}
 @media (prefers-color-scheme:dark){html:not([data-theme="light"]){color-scheme:dark}}
 html[data-theme="dark"]{color-scheme:dark}
 html,body{margin:0;padding:0}

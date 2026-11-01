@@ -328,6 +328,13 @@ body:not([data-surface="/trash"]) .peach-react [data-media-card]:not([data-follo
     transition: opacity .15s ease, visibility 0s .15s;
   }
 }
+/* 改字模式下，缺失时长的说明必须能被点击命中。 */
+body[data-peach-copy-mode] .peach-react [data-media-card] [data-media-duration][data-copy-key] {
+  z-index: 10;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .peach-react [data-media-badge] { background: var(--ground); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }

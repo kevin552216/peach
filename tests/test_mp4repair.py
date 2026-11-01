@@ -426,6 +426,39 @@ class HeaderRepairStoreTests(unittest.TestCase):
 
         self.assertEqual(seen, [Path("ffprobe")])
 
+    def test_playback_header_repair_is_registered_before_it_reads_media(self):
+        import threading
+        from support.ledger import fresh_ledger
+        from peach.task_runs import TaskRunStore
+        from peach import task_control
+
+        ledger = self.root / 'ledger'
+        ledger.mkdir()
+        store = TaskRunStore(fresh_ledger(ledger))
+        repairs = HeaderRepairStore(self.root / 'managed-cache', _Resolver(), runs=store)
+        entered, release = threading.Event(), threading.Event()
+        def build(source, ffprobe):
+            entered.set()
+            release.wait(5)
+            task_control.checkpoint()
+            return self.header
+        with patch.object(mp4repair, 'repaired_header', build):
+            try:
+                repairs.request(6297, self.source)
+                self.assertTrue(entered.wait(5))
+                run = store.query(task_key='mp4-header-repair')[0]
+                self.assertEqual(run.status, 'running')
+                task_control.request(store, run.id, 'cancel')
+                release.set()
+                worker = next(iter(repairs._jobs.values())).thread
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(store.get(run.id).status, 'cancelled')
+                self.assertFalse(self.sidecar().exists())
+            finally:
+                release.set()
+                repairs.stop()
+
     def test_a_source_that_cannot_be_repaired_is_not_tried_again(self):
         """修不了的片子每次播放都重解一遍，就是把一分多钟的整片读白扔一次。"""
         attempts: list[Path] = []

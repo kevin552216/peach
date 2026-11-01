@@ -101,7 +101,13 @@
 | `/stats` | 统计 |
 | `/taste` | 口味分析 |
 | `/review` | 人工复核 |
-| `/data-cleanup` | 数据管理 |
+| `/data-cleanup` | 数据管理概览；日常扫描、待处理摘要、维护与清理入口 |
+| `/data-cleanup/organize` | 文件整理与批次历史 |
+| `/data-cleanup/resource-sync` | 核对文件与馆藏记录，清理失效条目、空目录与缓存 |
+| `/data-cleanup/orphan-records` | 处理文件已丢失但仍保留个人记录的作品 |
+| `/data-cleanup/media-repair` | 媒体修复 |
+| `/data-cleanup/links` | 链接检查与失效地址复核 |
+| `/data-cleanup/batch-delete` | 按女优批量永久删除关联影片 |
 | `/duplicates` | 重复文件 |
 | `/quality-goals` | 高清版目标 |
 | `/login` | 登录 |
@@ -131,7 +137,7 @@
 | `/follow-manage` | `/subscriptions` |
 | `/configuration` | `/settings/library` |
 | `/diagnostics` | `/settings/diagnostics` |
-| `/resource-sync` | `/data-cleanup#resource-sync` |
+| `/resource-sync` | `/data-cleanup/resource-sync` |
 
 兼容跳转保留查询参数；后退前进的背景信息留在历史条目中。索引尾斜杠跳到无尾斜杠路径。
 

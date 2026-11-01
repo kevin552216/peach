@@ -5,6 +5,7 @@
    层级回到站内的 popover 档：Sonner 自带的九位数会连 tooltip 一起盖住。 */
 #toasts [data-sonner-toaster]{z-index:var(--layer-popover);font:var(--board-body)}
 #toasts .processing-task-toast{width:100%;right:0}
+.peach-guiding .processing-task-toast{visibility:hidden}
 [data-processing-dock]{width:100%}
 /* 状态色叠在不透明卡面上，悬浮任务不透出底下的页面。 */
 [data-processing-dock][data-processing-tone=error]{

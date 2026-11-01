@@ -208,12 +208,14 @@ def _recover(contract, asset_id: int, raw: str, tools: tuple[Path, Path, Path]) 
     try:
         recovery = mp4recover.recover(source, references, untrunc=untrunc, ffmpeg=ffmpeg,
                                       ffprobe=ffprobe, work=work)
-        mp4recover.replace_original(source, recovery.path)
+        from .task_control import committing
+        with committing():
+            mp4recover.replace_original(source, recovery.path)
+            _record_replacement(contract, asset_id, source, ffprobe)
     except (RepairUnavailable, OSError, subprocess.SubprocessError):
         return False
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    _record_replacement(contract, asset_id, source, ffprobe)
     return True
 
 
@@ -318,7 +320,7 @@ def w_media_repair(contract, body=None):
     job = contract.media_repair_job
     if body.get("stop") is True:
         job.stop(resume=False)
-        return _public(None)
+        return _public(job.snapshot())
     if body.get("status_only") is True:
         return _public(job.snapshot())
     if contract.header_repairs is None or contract.transcode_service is None:

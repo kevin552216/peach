@@ -1,12 +1,12 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "556d368b-6d9f-4f80-b678-cee86dd8d74e", e._sentryDebugIdIdentifier = "sentry-dbid-556d368b-6d9f-4f80-b678-cee86dd8d74e");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "f1e66a9f-8136-4270-8afc-e3d4a6acefc9", e._sentryDebugIdIdentifier = "sentry-dbid-f1e66a9f-8136-4270-8afc-e3d4a6acefc9");
 	} catch {}
 })();
 import { ApiError as e, Button as t, ButtonLink as n, Chip as r, DIAGNOSTICS_KEY as i, Disclosure as a, EmptyState as o, Fact as s, FactList as c, Fieldset as l, FieldsetTitle as u, Input as d, LOC as f, LinkButton as p, LoadingDots as m, Note as h, Progress as g, Section as _, SettingsCard as v, SettingsSectionLabel as y, Stack as b, __toESM as x, apiGet as S, apiSend as C, busyProps as w, configurationSection as ee, cx as T, diagnosticHeaders as E, diagnosticsSkeleton as D, errorMessage as O, fetchDiagnostics as k, fmtDur as A, fmtSize as j, queryClient as te, require_jsx_runtime as ne, require_react as re, settingsPath as ie, tl as M, useAction as N, useQuery as P } from "./peach-app.js";
 import { ErrorExcerpt as F } from "./peach-app.error-excerpt-B8v2xEIP.js";
-import { DataTable as I } from "./peach-app.data-table-BUBc51R4.js";
+import { DataTable as I } from "./peach-app.data-table-C3qANjHs.js";
 import { SiteMark as L } from "./peach-app.site-mark-D_VlIyJz.js";
 // src/react/diagnostics/health-list.tsx
 var R = /* @__PURE__ */ x(re(), 1), z = ne(), B = (e) => e.title || e.name || e.code || `作品 #${e.id}`, V = (e) => [[
@@ -406,6 +406,7 @@ function ae(e) {
 		className: "flex min-w-0 flex-col gap-6",
 		children: [
 			/* @__PURE__ */ (0, z.jsxs)("div", {
+				"data-guide-target": "report",
 				className: "flex flex-wrap justify-end gap-2",
 				children: [/* @__PURE__ */ (0, z.jsx)(Q, {}), /* @__PURE__ */ (0, z.jsx)(t, {
 					variant: "secondary",
@@ -419,6 +420,7 @@ function ae(e) {
 				children: l
 			}) : null,
 			p.length ? /* @__PURE__ */ (0, z.jsx)(_, {
+				guide: "attention",
 				title: `需要关注 · ${p.length} 项`,
 				children: p.map(([e, t]) => /* @__PURE__ */ (0, z.jsx)($, {
 					name: e,
@@ -426,6 +428,7 @@ function ae(e) {
 				}, e))
 			}) : null,
 			/* @__PURE__ */ (0, z.jsx)(_, {
+				guide: "health",
 				title: "库健康",
 				children: /* @__PURE__ */ (0, z.jsxs)(b, { children: [f.library.issue_at ? /* @__PURE__ */ (0, z.jsxs)("p", {
 					className: "text-body-2-regular text-text-secondary",
@@ -463,6 +466,7 @@ function ae(e) {
 			}) : null,
 			/* @__PURE__ */ (0, z.jsx)(K, {}),
 			/* @__PURE__ */ (0, z.jsxs)("section", {
+				"data-guide-target": "sessions",
 				"aria-label": "来源会话",
 				className: "flex min-w-0 flex-col gap-3",
 				children: [
@@ -510,4 +514,4 @@ function ae(e) {
 }
 export { ae as DiagnosticsPage };
 
-//# debugId=556d368b-6d9f-4f80-b678-cee86dd8d74e
+//# debugId=f1e66a9f-8136-4270-8afc-e3d4a6acefc9

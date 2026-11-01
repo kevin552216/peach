@@ -175,7 +175,7 @@ export function StorageSettings({ initial, receipt }: { initial: StorageState; r
     return copy;
   });
   return (
-    <Section id="storageSettings" title="存储空间">
+    <Section id="storageSettings" guide="storage" title="存储空间">
       <FactList>
         <Fact term="数据目录">
           <PathLine path={storage.data_root} className="text-body-regular text-text-primary" onRevealed={receipt} />

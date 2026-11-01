@@ -195,7 +195,7 @@ function MediaForm({ data, receipt }: ConfigurationGroupProps) {
 
   if (saved) {
     return (
-      <Section title="媒体库与目录">
+      <Section guide="media" title="媒体库与目录">
         <Stack>
           <Note tone="success" title="配置已保存">
             Peach 正在重新启动。稍后自动跳转，或点击<LinkButton href={saved.url} size="small">进入馆藏</LinkButton>。
@@ -210,7 +210,7 @@ function MediaForm({ data, receipt }: ConfigurationGroupProps) {
   const cloud = rows.some((row) => isCloudSource(row.location));
   const missing = cloud ? (data.mount_dependencies ?? []).filter((dependency) => !dependency.available) : [];
   return (
-    <Section title="媒体库与目录" onSubmit={submit}>
+    <Section guide="media" title="媒体库与目录" onSubmit={submit}>
       <Stack>
         {/* 按媒体库分组：名称、图标、来源色、处理方式属于媒体库，每组只写一次；
             下面列这个媒体库的文件夹，文件夹只管路径、来源与读取策略。 */}
@@ -365,7 +365,7 @@ function MountStatus({ data }: { data: ConfigurationData }) {
   const refresh = () => void action.run('refresh', (signal) => fetchConfiguration(signal),
     (result) => queryClient.setQueryData(CONFIGURATION_KEY, result));
   return (
-    <Section title="挂载状态">
+    <Section guide="mounts" title="挂载状态">
       <FactList>
         {sources.map((row, index) => (
           <Fact key={index} term={<><SourceMark mark={sourceMark(row.location)} />{sourceName(row.location)}</>}>

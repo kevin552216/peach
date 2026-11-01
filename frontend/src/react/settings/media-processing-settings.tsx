@@ -24,7 +24,7 @@ export function MediaProcessingSettings({ receipt }: { receipt(message: string):
   const error = action.error || (policy.error ? errorMessage(policy.error) : '');
   const blocked = !policy.data || policy.isFetching || !!action.busy;
   return (
-    <Section title="视频预览">
+    <Section guide="preview" title="视频预览">
       <Rows>
         <SettingsRow label="生成视频预览" description="为本地视频生成九宫格与时间轴预览；关闭后仍按入库规则探测时长与分辨率。">
           <Switch aria-label="生成视频预览" isSelected={!!policy.data && !policy.data.metadata_only} isDisabled={blocked}
@@ -67,7 +67,7 @@ export function PlaybackTranscodeSettings({ receipt }: { receipt(message: string
   const action = useAction();
   const error = action.error || (policy.error ? errorMessage(policy.error) : '');
   return (
-    <Section title="视频播放">
+    <Section guide="transcode" title="视频播放">
       <Rows>
         <SettingsRow label="转码方式" description="用于播放时的视频转码。">
           <div id="playbackAccelerationSetting">

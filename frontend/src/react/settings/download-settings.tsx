@@ -192,7 +192,7 @@ function DownloadForm({ state, settle, receipt, pikpakAccount }: CardProps & { p
   };
 
   return (
-    <Section title="云下载" onSubmit={submit}>
+    <Section guide="download" title="云下载" onSubmit={submit}>
       {state.problems?.length ? <Stack><Note tone="error" title="云下载配置需要检查">{state.problems.join('\n')}</Note></Stack> : null}
       <Stack>
         <Input label="CloudDrive2 地址" placeholder="留空自动查找" autoComplete="off" maxLength={200}
@@ -400,7 +400,7 @@ function PikPakAccount({ state, settle, receipt, username, setUsername }: CardPr
   const outcomeFailed = browser.state === 'timeout' || browser.state === 'failed';
 
   return (
-    <Section title="PikPak 账号" icon={<PikPakIcon />} onSubmit={login}
+    <Section guide="pikpak" title="PikPak 账号" icon={<PikPakIcon />} onSubmit={login}
       aside={<StatusLabel tone={account.logged_in ? 'success' : waiting ? 'progress' : outcomeFailed ? 'error' : 'neutral'}>
         {account.logged_in ? '已登录' : waiting ? '等待登录' : outcomeFailed ? '登录未完成' : '待登录'}</StatusLabel>}>
       {account.logged_in ? (

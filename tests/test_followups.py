@@ -1637,11 +1637,12 @@ class TaskPayloadTests(LedgerTestCase):
 
     def test_the_detail_endpoint_gives_both_ends_of_the_chain(self):
         from peach.web_tasks import q_task
+        from peach.web_contract import WebContract
 
         parent = self.parent()
         queued = self.store.enqueue_followups(
             parent.id, [("entity-avatar:performer:1", AVATAR_TASK_KEY, "甲")])["queued"]
-        contract = SimpleNamespace(task_runs=self.store)
+        contract = WebContract(self.db)
         payload = q_task(contract, parent.id)
         self.assertIsNone(payload["parent"])
         self.assertEqual([row["id"] for row in payload["followups"]], queued)

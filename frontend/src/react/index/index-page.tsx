@@ -25,6 +25,9 @@ import { IDENTITY_ROW_CLASS } from '../../identity-filter';
 import { BoardTabs, type BoardTab } from '../components/board-tabs';
 import { EmptyState } from '../components/empty-state';
 import { LibraryShortcuts } from '../library-shortcuts/shortcut-controls';
+import { AsyncText } from '../components/async-text';
+import { SkeletonContent } from '../components/skeleton-content';
+import { pageNavigationReady } from '../../history/page-navigation';
 import { SEGMENTED_TRACK, SEGMENT_ICON, SegmentedRadioGroup as RadioGroup } from '../components/segmented';
 import { spriteGlyph } from '../components/sprite-glyph';
 import type { OnlineAuthor, OnlineTag } from '../follow/online-vocab';
@@ -89,6 +92,12 @@ export function IndexPage(props: IndexProps) {
   const [route, setRoute] = useState<IndexRoute>(() => indexRoute(
     { kind: props.kind, q: props.q, scope: props.scope, view: props.view, category: props.category },
   ));
+  const incoming = JSON.stringify([props.kind, props.q, props.scope, props.view, props.category]);
+  const [previousIncoming, setPreviousIncoming] = useState(incoming);
+  if (incoming !== previousIncoming) {
+    setPreviousIncoming(incoming);
+    setRoute(indexRoute(props));
+  }
   const [layout, setLayout] = useState<PeopleLayout>(props.layout);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [match, setMatch] = useState<'any' | 'all'>('any');
@@ -112,13 +121,10 @@ export function IndexPage(props: IndexProps) {
   /* 选择键归壳：关掉时所选跟着清空，下次打开从零开始，同目录页的多选。 */
   useEffect(() => { if (!props.selectMode) setPicked(new Set()) }, [props.selectMode]);
 
-  /* 打字过滤是在同一份名单上重问一次：新结果到手前留着上一份，骨架不盖上来。换词表、类型、
-     视图或公司类型问的是另一份东西，照常先铺骨架。 */
-  const [refining, setRefining] = useState(false);
+  /* 换筛选、词表或类型时保留控件，只在结果区显示等待态。 */
   const go = (patch: Partial<IndexRoute>, replace = false) => {
     if (patch.scope !== undefined) setManaging(false);
     const next = { ...route, ...patch };
-    setRefining(Object.keys(patch).every((key) => key === 'q'));
     setRoute(next);
     props.route(next, { replace });
   };
@@ -133,11 +139,16 @@ export function IndexPage(props: IndexProps) {
     initialPageParam: kind === 'tags' ? pagination.pageIndex * pagination.pageSize : 0,
     getNextPageParam: kind === 'tags' ? () => undefined : query.getNextPageParam,
     enabled: !(managing && kind === 'tags'),
-    placeholderData: refining ? keepPreviousData : undefined,
+    placeholderData: keepPreviousData,
   });
   const items = flatItems(result.data);
+  const pending = result.isPending || result.isPlaceholderData;
   const more = !!result.hasNextPage && !result.isPlaceholderData;
   const total = result.data?.pages[0]?.total;
+  useEffect(() => {
+    void pageNavigationReady(() => window.location.pathname === `/${kind}` && !!root.current?.isConnected,
+      root.current?.querySelector('[data-index-body]'), { pending });
+  }, [result.data, result.isPending, result.isPlaceholderData, route]);
   useTagPageBounds(kind === 'tags' && !result.isPlaceholderData ? total : undefined, pagination, changePage);
   const readout = kind === 'tags'
     ? (result.isPending || result.isError ? '' : `${(total ?? items.length).toLocaleString()} 个标签`)
@@ -193,9 +204,8 @@ export function IndexPage(props: IndexProps) {
   const categories = (onlineTags ? ONLINE_TAG_CATEGORIES : TAG_CATEGORIES).filter(hasEntries);
 
   const body = () => {
-    if (result.isPending) {
-      return <div aria-busy="true" dangerouslySetInnerHTML={{ __html: kind === 'tags'
-        ? tagSkeletonHtml({ mode:view, pageSize:pagination.pageSize }) : indexSkeletonHtml({ kind, layout, mode: view }) }} />;
+    if (pending) {
+      return null;
     }
     if (result.isError) {
       return (
@@ -222,7 +232,8 @@ export function IndexPage(props: IndexProps) {
         {isPeople(kind) ? (
           <span data-index-count="" className="text-caption-1-regular leading-5 whitespace-nowrap text-text-secondary tabular-nums max-board-narrow:order-1 max-board-narrow:basis-full">
             {/* 没取到就没有读数：「0 项」读起来是「名册是空的」，和报错说的是两件事。 */}
-            {result.isPending || result.isError ? '' : readout}
+            <AsyncText text={pending ? undefined : result.isError ? '' : readout} busy={pending}
+              placeholder={<span aria-hidden className="skeleton-sheen inline-block h-3.5 w-24 rounded-md" />} />
           </span>
         ) : null}
         {isPeople(kind) ? <LayoutSwitch kind={kind} layout={layout} onChange={changeLayout} /> : null}
@@ -260,8 +271,11 @@ export function IndexPage(props: IndexProps) {
           onJump={(at) => root.current?.querySelector(`[data-alpha-group="${at}"]`)
             ?.scrollIntoView({ block: 'start', behavior: 'smooth' })} />
       ) : null}
-      <div data-index-body="">{body()}</div>
-      {kind === 'tags' && !result.isPending && !result.isError ? <div className="mt-5">
+      <div data-index-body=""><SkeletonContent pending={pending} skeletonHtml={() => kind === 'tags'
+        ? tagSkeletonHtml({ mode:view, pageSize:pagination.pageSize }) : indexSkeletonHtml({ kind, layout, mode: view })}>
+        {body()}
+      </SkeletonContent></div>
+      {kind === 'tags' && !pending && !result.isError ? <div className="mt-5">
         <DataTableFooter label="标签" total={total ?? items.length} pagination={pagination} onChange={changePage} unit="个标签" pageUnit="个" pageSizes={TAG_PAGE_SIZES} />
       </div> : null}
       {more ? (

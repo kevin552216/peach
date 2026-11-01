@@ -113,7 +113,8 @@ describe('读数', () => {
     document.body.innerHTML = '';
     const failed = await mount(<CatalogFilterPage {...props({ count: false })} />);
     expect(count(failed, '[data-skeleton="count"]')).toBe(0);
-    expect(count(failed, '[data-count-readout]')).toBe(0);
+    expect(count(failed, '[data-count-readout]')).toBe(1);
+    expect(failed.querySelector('[data-count-readout] [aria-busy="true"]')).toBeNull();
     expect(failed.querySelector('[data-catalog-readout]')?.textContent).toBe('');
   });
 });

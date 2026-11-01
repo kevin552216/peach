@@ -116,7 +116,7 @@ function sidebarHost(order = ['', 'unseen', 'follow'], current = '', attached: (
   const host: SidebarHost = {
     scroll, store, navCatalog: CATALOG,
     navOn: (key) => key === pressed,
-    navTo: vi.fn(), toggleChip: vi.fn(), setDuration: vi.fn(), openFollowTag: vi.fn(), selectFollowTag: vi.fn(),
+    navTo: vi.fn(), navToTop: vi.fn(), toggleChip: vi.fn(), setDuration: vi.fn(), openFollowTag: vi.fn(), selectFollowTag: vi.fn(),
     selectFollowProvider: vi.fn(), setFollowDuration: vi.fn(),
     attached: vi.fn(attached),
   };
@@ -272,31 +272,25 @@ describe('导航', () => {
     expect(scroll.querySelector('[data-nav=""]')!.getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('拖到另一项下半截就排到它后面：先落本地 store，再写 /api/settings', async () => {
-    const fetcher = fetchMock(200, { sidebarOrder: ['unseen', 'follow', ''] });
+  it('双击导航只请求回顶，不重建栏目内容', async () => {
+    const { scroll, host } = await setup();
+    act(() => { scroll.querySelector('[data-nav=""]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) });
+    expect(host.navToTop).toHaveBeenCalledOnce();
+  });
+
+  it('键盘下移一项：先落本地 store，再写 /api/settings', async () => {
+    const fetcher = fetchMock(200, { sidebarOrder: ['unseen', '', 'follow'] });
     vi.stubGlobal('fetch', fetcher);
     const { scroll, store } = await setup();
-    const fire = (node: Element, type: string, clientY = 0) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, {
-        dataTransfer: { value: { setData: () => {}, effectAllowed: '', dropEffect: '' } },
-        clientY: { value: clientY },
-      });
-      act(() => { node.dispatchEvent(event) });
-    };
-    const home = scroll.querySelector('[data-nav=""]')!, follow = scroll.querySelector('[data-nav="follow"]')!;
-    fire(home, 'dragstart');
-    expect(home.hasAttribute('data-dragging')).toBe(true);
-    fire(follow, 'dragover', 10);
-    expect(follow.getAttribute('data-drop')).toBe('after');
-    fire(follow, 'drop', 10);
+    act(() => { scroll.querySelector('[data-nav=""]')!.dispatchEvent(new KeyboardEvent('keydown',
+      { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true })) });
     await settle();
-    expect(store.value.sidebarOrder).toEqual(['unseen', 'follow', '']);
-    expect(JSON.parse(localStorage.getItem('peach.settings.v1')!).sidebarOrder).toEqual(['unseen', 'follow', '']);
-    expect(navKeys(scroll)).toEqual(['unseen', 'follow', '']);
+    expect(store.value.sidebarOrder).toEqual(['unseen', '', 'follow']);
+    expect(JSON.parse(localStorage.getItem('peach.settings.v1')!).sidebarOrder).toEqual(['unseen', '', 'follow']);
+    expect(navKeys(scroll)).toEqual(['unseen', '', 'follow']);
     expect(scroll.querySelector('[data-dragging],[data-drop]')).toBeNull();
     expect(fetcher.mock.calls[0]?.[0]).toBe('/api/settings');
-    expect(sentBody(fetcher)).toEqual({ sidebarOrder: ['unseen', 'follow', ''] });
+    expect(sentBody(fetcher)).toEqual({ sidebarOrder: ['unseen', '', 'follow'] });
   });
 
   it('挪不了的情形不产生新顺序', async () => {

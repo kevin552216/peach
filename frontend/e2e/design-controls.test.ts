@@ -165,7 +165,7 @@ describe('设计决定：控件、状态与首页顶部', () => {
   it('持久警示是状态色块，不和字段说明共用灰色小字', { timeout: 60_000 }, async () => {
     const opened = await openAccess(browser);
     try {
-      await opened.form.getByText('关闭访问密码', { exact: true }).click({ timeout: 5_000 });
+      await opened.form.getByRole('checkbox', { name: '关闭访问密码', exact: true }).locator('xpath=ancestor::label[1]').click({ timeout: 5_000 });
       const note = opened.form.locator('[role="note"]');
       await note.waitFor({ timeout: 5_000 });
       const surface = await note.evaluate((element) => getComputedStyle(element).backgroundColor);
@@ -201,7 +201,7 @@ describe('设计决定：控件、状态与首页顶部', () => {
     }
   });
 
-  it('任务结果成功绿、失败红、中断黄，取消与排队中性', { timeout: 60_000 }, async () => {
+  it('任务结果成功绿、失败和取消红、中断黄，排队中性', { timeout: 60_000 }, async () => {
     const opened = await openActivity(browser, [
       settledRun(1, 'succeeded', '追更检查'), settledRun(2, 'failed', '扫描与采集'),
       settledRun(3, 'cancelled', '批量操作'), settledRun(4, 'pending', '命令行批处理'),
@@ -214,7 +214,7 @@ describe('设计决定：控件、状态与首页顶部', () => {
       assert.equal(await badge('succeeded'), await token('--color-status-lime-background'));
       assert.equal(await badge('failed'), await token('--color-status-rose-background'));
       assert.equal(await badge('interrupted'), await token('--color-status-yellow-background'));
-      assert.equal(await badge('cancelled'), await token('--color-background-tertiary-default'));
+      assert.equal(await badge('cancelled'), await token('--color-status-rose-background'));
       assert.equal(await badge('pending'), await token('--color-background-tertiary-default'));
       assert.deepEqual(opened.problems, []);
     } finally {
@@ -573,7 +573,7 @@ describe('设计决定：控件、状态与首页顶部', () => {
     }
   });
 
-  it('读数首次静态落笔，变值时每一位都有有效动画', { timeout: 60_000 }, async () => {
+  it('数字首写静态、变值弹入；筛选读数原位淡入淡出并保留控件', { timeout: 60_000 }, async () => {
     const opened = await openCatalogFixture(browser, (payload, url) => {
       payload.total = url.searchParams.has('q') ? 34 : 12;
     });
@@ -600,36 +600,33 @@ describe('设计决定：控件、状态与首页顶部', () => {
       assert.equal(result.animationName, 'digit-pop-in');
       assert.equal(result.duration, '0.25s');
 
-      const input = opened.page.locator('#q');
-      await opened.page.evaluate(() => {
-        document.documentElement.removeAttribute('data-count-animation');
-        const count = document.querySelector('[data-catalog-filter]');
-        const observer = new MutationObserver(() => {
-          const digit = count?.querySelector<HTMLElement>('[data-count-readout] .digits.popping > span');
-          if (!digit) return;
-          const style = getComputedStyle(digit);
-          document.documentElement.dataset.countAnimation = JSON.stringify({
-            animationName: style.animationName,
-            duration: style.animationDuration,
-          });
-          observer.disconnect();
+      const page = opened.page;
+      const input = page.locator('#q');
+      const readout = page.locator('[data-catalog-readout] [data-async-text]');
+      const before = await readout.boundingBox();
+      let release = () => {};
+      const held = new Promise<void>(resolve => { release = resolve });
+      await page.route('**/api/items?**', async route => { await held; await route.fallback() });
+      await page.evaluate(() => { Object.assign(window, { countFrame: document.querySelector('[data-catalog-frame]') }) });
+      try {
+        await input.fill('读数变值');
+        await input.press('Enter');
+        await page.waitForFunction(() => document.querySelector('[data-catalog-readout] [data-async-text]')?.getAttribute('aria-busy') === 'true');
+        const fading = await readout.evaluate(node => {
+          const value = node.querySelector('[data-async-text-value]')!;
+          const skeleton = node.querySelector('[data-async-text-skeleton]')!;
+          return { hidden: value.getAttribute('aria-hidden'), transition: getComputedStyle(value).transitionProperty,
+            duration: parseFloat(getComputedStyle(value).transitionDuration), width: skeleton.getBoundingClientRect().width,
+            same: (window as unknown as { countFrame: Element }).countFrame === document.querySelector('[data-catalog-frame]') };
         });
-        observer.observe(count!, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-      });
-      await input.fill('读数变值');
-      await input.press('Enter');
-      await opened.page.waitForFunction(() =>
-        document.querySelector('[data-catalog-filter] [data-count-readout]')?.textContent?.includes('34 个符合'));
-      /* 读数更新后还可能因自动续页再重画。在触发前观察真实节点，既能验收
-         动画的计算值，也不把断言绑在之后某一次采样恰好撞上短暂节点。 */
-      await opened.page.waitForFunction(() =>
-        document.documentElement.hasAttribute('data-count-animation'), undefined, { timeout: 5_000 });
-      const liveAnimation = await opened.page.evaluate(() =>
-        JSON.parse(document.documentElement.dataset.countAnimation || '{}') as {
-          animationName?: string; duration?: string;
-        });
-      assert.equal(liveAnimation.animationName, 'digit-pop-in', '真实读数节点变值后没有播放动画');
-      assert.equal(liveAnimation.duration, '0.25s');
+        assert.equal(fading.hidden, 'true');
+        assert.ok(fading.transition.includes('opacity') && fading.duration > 0, '读数缺少淡入淡出');
+        assert.ok(before && Math.abs(fading.width - before.width) <= 1, '等待骨架没有保留读数宽度');
+        assert.equal(fading.same, true, '加载读数替换了筛选控件');
+      } finally { release() }
+      await page.waitForFunction(() => document.querySelector('[data-catalog-readout]')?.textContent?.includes('34 个符合'));
+      assert.equal(await readout.getAttribute('aria-busy'), null);
+      assert.equal(await readout.locator('[data-async-text-value]').getAttribute('aria-hidden'), null);
     } finally {
       await opened.close();
     }

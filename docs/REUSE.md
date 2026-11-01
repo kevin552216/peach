@@ -15,6 +15,26 @@ amane 桥使用统一发行资源根；Windows、macOS 和 wheel 包携带桥脚
 共用写入入口按实际命中的资产与字段检查保护，旧版按番号分组的候选与自动标签并集也受约束；同一组里有受保护资产时交回复核。用户明确批准的采用仍可替换保护值。
 
 来源偏好复用 `metadata_routes.parse_route_overrides`、内容类型裁剪与既有 HTTPX 客户端。保存的是本机内置来源的排列和经单行 ASCII 校验的 User-Agent，读取失败回到内置默认；显式任务路由仍覆盖对应类型。amane 桥通过既有 CLI 边界传递身分，薄适配器只在上游 `WebClient.request` 公开入口补请求头，不修改指纹、重试与限流策略。排序复用 `wireDragReorder` 并提供 Alt 与方向键操作。失败清单导出复用 `/api/library-processing/issues` 的任务号校验与分页响应，浏览器原生 Blob 下载 JSON，不引入导出库。
+## 跨平台任务资源计量
+
+继续使用 psutil 7.2.2 读取进程 CPU 时间和身份。该版本的 macOS 线程列表使用序号，不能与 Python 原生线程 ID 对应；因此使用系统 `libproc` 的 `PROC_PIDTHREADID64INFO` 取得指定线程的纳秒时间，接口与单位见 [XNU 实现](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/bsd_kern.c)。Linux 的可用 CPU 容量复用亲和性、控制组成员和挂载信息，按可见 cgroup v1/v2 配额归一化。
+
+Linux GPU 读取 [DRM fdinfo 标准](https://docs.kernel.org/gpu/drm-usage-stats.html)的客户端、设备和引擎忙碌时间；重复描述符去重，计数回退保持高水位，进程重用重新采样。容器沿用当前设备与 PID 命名空间，不要求宿主 PID 权限。macOS 和未提供该计数的 Linux 驱动明确显示未取得，不使用整机 GPU 占用替代任务。实现只调用系统接口，无新增依赖；测试覆盖平台接口、配额、权限、重复客户端和原生线程时间增长。
+
+## 数据管理层级
+
+数据管理首页按待处理事项看板、扫描与采集、整理与维护、清理与删除排列。日常扫描直接操作，其余工具在独立二级页展开表单和清单；首页只读摘要。工具名称、顺序和地址由 `frontend/src/cleanup-tools.ts` 供首页、路由、面包屑与加载态共用。已分享的工具锚点转到对应二级页，保留查询参数。
+
+数字驱动的人工复核、重复文件、垃圾文件、高清版和回收站在顶部组成看板，复用 `PlainStat` 的大数字样式。整理、维护和批量删除共用 `CleanupEntryCard` 的功能入口样式；首屏加载态复用同一套卡面。入口不执行删除，危险样式留给二级页的执行按钮和确认窗口。
+
+## 按女优删除影片
+
+数据管理页的「批量删除」复用 `DataTable` 的排序、分页和跨页勾选、女优名册的姓名与头像装配、`confirmModal()`、`purge_assets()` 和缓存清理入口，不新增依赖。`/api/performer/delete-plan` 按所选实体 ID 的并集列出全部视频，包括回收站记录；多人共同出演的文件去重。执行前在写锁内核对清单摘要，关联、路径或记录版本变化时拒绝旧清单。永久删除沿用媒体先隔离、账本失败恢复、文件失败保留记录的顺序，保留女优档案、照片与其他人物的独立影片；多人出演的同一文件会从所有关联人物的作品中消失。
+
+## 教程中心与界面导览
+
+复用 [Driver.js](https://driverjs.com/) `1.10.2`（MIT）的遮罩、箭头和边缘避让，正文与操作复用 Peach 的 React、BoardUI 和弹层组件。步骤绑定组件锚点，布局变化调用 `refresh()`；设置路由复用当前路由定义。教程状态复用账本 `profile.settings_json` 和现有读写事务，通过 `/api/tutorial-progress` 按动作更新，所有设备共用。入口、提示版本与维护边界见 [教程中心](ONBOARDING.md)。
+
 ## 首页筛选聚合与缓存
 
 采用 bbingz 的 [PR #205](https://github.com/peach-mitao/peach/pull/205)，固定来源提交 `bbf5aac8e9562211c324c2019bff35888266df84`，许可证沿用本项目 AGPL-3.0-or-later。作品筛选集合先在独立子查询中求出，创作者、标签和演员按既有关系聚合，保留去重计数与标签可见性。没有选中标签时移除无效 `tag_match`，复用既有修订缓存、同键锁与跨连接写入失效机制，不在线改写 SQLite 统计或增加索引迁移。
@@ -188,6 +208,8 @@ npm 安装沿用 Node.js 24 LTS 附带的官方 [`npm ci`](https://docs.npmjs.co
 采集磁盘预估复用 `ProcessingTraffic`、`TrafficPlan` 的待执行与完成范围，以及 `typical_size` 的本地缓存采样。`processing_storage` 仅用 Python 标准库 `shutil.disk_usage` 和文件系统设备编号合并同盘、分别核对跨盘容量；输出读数由现有 `TrafficProgress` 同时用于启动弹窗、运行任务卡和任务通知。网盘挂载缓存保持未观测状态，不把流量数直接算成最终磁盘产物。无新增依赖。
 
 ## 状态与同步弹窗
+
+导航位置由 `history/page-navigation.ts` 统一保存与恢复，同一标签页保留各栏目的筛选、分页和内容缓存；普通栏目往返平滑恢复位置，双击导航请求回顶。左侧导航排序复用 `moveSidebarKey` 与现有设置保存入口，指针移动只更新插入提示和避让，松手时保存一次；键盘使用 Alt + 方向键。动效参数与证据边界见[导航拖动参考](reference-snapshots/kubai-sidebar-reorder.md)，未新增依赖。
 
 全站滚动区通过 `observeScrollRegions` 按实际 `overflow` 接入现有 `attachOverlayScrollbar`，动态新增子树、样式启用和响应式布局复用同一入口；样式读取与轨道写入分批，行内样式变化只复核当前元素。普通内容区使用同级轨道，定位浮层与原生顶层内的轨道保持在自身层级并补偿滚动位置。组件卸载释放监听、观察器及轨道。横向手势导航保留 `wireHorizontalScroller` 的拖动和渐隐。路由冒烟统一检查所有实际溢出的滚动区，搜索回归覆盖滑块拖动、滚轮、关闭重开和轨道数量。没有新增依赖。
 
@@ -1085,6 +1107,10 @@ Python 源文件纳入 `src/peach/library_sharing.py` 与 `src/peach/library_pro
 链接检查结果的身份引用复用 `web_catalog.entity_ref`，页面头像沿用 `entityFaceImg` 的取景和回退，地址前的 favicon 复用 `SiteMark` 与 `/link-mark`；两张结果表共用列定义，Peach 资料名称使用 `entityPath` 生成内部链接。明确的 HTTP 状态码使用 BoardUI Chip，解释与长错误使用可展开的普通正文；永久删除入口位于失效清单自己的页脚，说明与分隔线使用中性色。关注列表无来源时使用 `EmptyState` 的 page 外壳，背景、边框与添加入口同属空状态。断链按钮使用现有 Lucide unlink 字形，仅四条短线循环改变透明度，周期沿用 Loading Dots 的 1.2 秒，reduced motion 沿用全局规则。
 
 ## 馆藏处理控制与耗时预估
+
+任务中心的本机控制复用 `task_run` 的运行身份、`job_recovery` 的请求和检查点、`filelock` 与原子 JSON。`task_control` 保存逐轮控制意图；`BackgroundJob`、后继和命令行执行段共用安全停点。父任务的意图沿父子关联传递，排队任务领取前核对暂停与取消。媒体子进程使用固定版本 psutil 7.2.2（BSD-3-Clause）的暂停、继续、进程身份检查和所属子进程枚举，Windows 沿用已有 kill-on-close Job Object，macOS/Linux 使用专属会话的进程组；平台语义见 [psutil API](https://psutil.readthedocs.io/stable/) 和 [Python 子进程说明](https://docs.python.org/3.14/library/subprocess.html)。psutil 从开发依赖调整为运行依赖，没有新增调度器。网络和文件提交在安全停点响应，任务只有在在途工作退出后才结算取消。
+
+逐轮资源读数复用 psutil 的 native thread ID、线程 CPU 时间和已登记子进程身份，按本机总 CPU 容量归一化；父子汇总按计数器身份去重。Windows GPU 使用标准库 ctypes 调用 [PDH GPU 引擎计数器](https://learn.microsoft.com/en-us/windows/win32/perfctrs/performance-counters-portal)，按物理引擎汇总所属子进程并显示最忙引擎；不把共享服务的 GPU 占用分配给单一任务。网络复用现有 HTTPX 下载字节计量，以相邻采样差分取得下载速度，挂载和无法归属的传输明确未取得。资源归属沿任务控制上下文登记，以原子 JSON 支持命令行任务；读取校验服务 PID 与创建时间，历史任务不保留过期实时数值。界面复用 BoardUI `Chip` 的蓝、紫、青与红色状态 token，取消确认复用现有 `confirmModal`。未新增依赖。
 
 长时任务续跑复用 `job_recovery` 的本机原子记录、`BackgroundJob.checkpoint` 与 `TaskRunHandle.checkpoint`。主任务保留原 `job_id`、`run_id`、开始时间、处理范围和领域检查点；后继重排保留原进度。扫描复用现有 `os.scandir`、SQLite 批次提交、`filelock` 和 `fsutil.atomic_write_text`，保存遍历栈、文件名游标及字幕配对资料。本地资料按影片保存小份证据边车，候选成功落盘后才提交元数据完成集合；整理逐项原子保存同一批次的日志。`scrape_codes.py` 复用流式 CSV 与原始来源快照，续跑只保留已确认完成的番号，未完成番号可以重放。
 

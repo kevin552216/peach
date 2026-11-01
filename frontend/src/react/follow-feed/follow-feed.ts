@@ -180,9 +180,8 @@ export interface FollowCredentials { providers?: { provider: string; present?: b
 
 /* ── 取数键 ── */
 
-/** 离开关注页以后，列表在缓存里留多久。回到关注页时照这一份原样画，已经加载的几页和滚动位置
- *  才接得上；默认的 5 分钟太短，点开别处看一部片子回来就没了。 */
-export const FOLLOW_FEED_GC_MS = 30 * 60_000;
+/** 同一标签页保留已加载的关注内容，主动刷新仍按新代次取数。 */
+export const FOLLOW_FEED_GC_MS = Infinity;
 
 /** 列表的键。媒体切换是纯前端分组，不进键：换视图不重取。`revision` 是壳要求重读的代次。 */
 export function followFeedQuery(view: FollowView, revision: number) {

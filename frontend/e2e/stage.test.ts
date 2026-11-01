@@ -209,6 +209,18 @@ describe('舞台岛', () => {
       assert.equal(await page.locator('#stage[data-theater]').count(), 0, 'T 键没切回来');
       assert.equal(await theater.getAttribute('aria-pressed'), 'false');
 
+      for (const size of [{ width: 1074, height: 884 }, { width: 390, height: 844 }, { width: 1320, height: 1088 }]) {
+        await page.setViewportSize(size);
+        await page.waitForFunction(() => {
+          const media = document.querySelector('#stage [data-stage-media]')?.getBoundingClientRect();
+          const controls = document.querySelector('#stage .vjs-control-bar')?.getBoundingClientRect();
+          const timeline = document.querySelector('#stage .vjs-progress-control')?.getBoundingClientRect();
+          return media && controls && timeline && controls.bottom <= media.bottom + 1
+            && timeline.top >= media.top - 1 && timeline.right <= media.right + 1;
+        });
+      }
+      await page.setViewportSize({ width: DESKTOP.width, height: DESKTOP.height });
+
       /* 桩里的片源放不出来，Video.js 停在错误态、控件条不接指针，悬停量不到；只量提示的内容。 */
       const tip = page.locator('#stage [data-player-theater] > .vjs-peach-tooltip');
       assert.equal(await theater.getAttribute('title'), null, '原生 title 与自绘提示会叠在一起');

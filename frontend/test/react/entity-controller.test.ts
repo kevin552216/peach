@@ -105,7 +105,7 @@ describe('实体与索引域控制', () => {
     expect(ports.showMissing).toHaveBeenCalledWith('creator');
   });
 
-  it('异步名单等待与重读都尊重页面取消权', async () => {
+  it('立即显示目标骨架，异步名单和重读回执尊重页面取消权', async () => {
     let resolveWait = () => {}, resolveLoad = () => {}, current = true;
     const wait = new Promise<void>(resolve => { resolveWait = resolve });
     const load = new Promise<void>(resolve => { resolveLoad = resolve });
@@ -113,12 +113,14 @@ describe('实体与索引域控制', () => {
       loadShapes: () => load, syncParts: vi.fn() };
     const loading = createEntityLoading(ports);
     const first = loading('creator', '甲', () => current);
+    expect(ports.paintSkeleton).toHaveBeenCalledWith('creator', '甲');
     current = false; resolveWait(); await first;
-    expect(ports.paintSkeleton).not.toHaveBeenCalled();
+    expect(ports.syncParts).not.toHaveBeenCalled();
     current = true; await loading('creator', '乙', () => current);
     expect(ports.paintSkeleton).toHaveBeenCalledWith('creator', '乙');
+    expect(ports.syncParts).toHaveBeenCalledExactlyOnceWith('creator', '乙');
     current = false; resolveLoad(); await Promise.resolve();
-    expect(ports.syncParts).not.toHaveBeenCalled();
+    expect(ports.syncParts).toHaveBeenCalledTimes(1);
   });
 
   it('索引地址只写适用维度，在线作者跳转先收索引再写关注目标', () => {

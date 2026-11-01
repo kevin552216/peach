@@ -38,7 +38,7 @@ class AutomaticUpdates:
                 data["result"] = dict(result, checked_at=data.get("checked_at"))
             else:
                 data.pop("result")
-        return dict(data, available=self.available, download_available=distribution.standalone())
+        return dict(data, available=self.available, download_available=distribution.in_app_update())
 
     def remember(self, result: dict) -> None:
         """手动检查与后台检查共享最近一次结果。"""
@@ -62,7 +62,7 @@ class AutomaticUpdates:
             raise ValueError("请选择自动更新方式")
         if type(hours) is not int or hours not in (6, 24, 168):
             raise ValueError("请选择检查频率")
-        if mode == "download" and not distribution.standalone():
+        if mode == "download" and not distribution.in_app_update():
             raise ValueError("自动下载仅适用于 Windows 独立测试包")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.path) + ".lock", timeout=0):
@@ -90,7 +90,8 @@ class AutomaticUpdates:
                 data.pop("error", None)
                 data = dict(data, checked_at=now, result=result)
                 self.write(data)
-                if data["mode"] == "download" and distribution.standalone() and result["state"] == "available":
+                # 以前在 macOS 独立包上存下的「自动下载」只按检查处理：那里没有应用内安装。
+                if data["mode"] == "download" and distribution.in_app_update() and result["state"] == "available":
                     job = standalone_update.public()
                     if job["state"] not in standalone_update.ACTIVE | {"ready"}:
                         try:

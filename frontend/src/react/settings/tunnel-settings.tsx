@@ -98,7 +98,7 @@ export function TunnelSettings({ revision: initialRevision, initial, receipt }: 
   ));
 
   return (
-    <Section id="tunnel" title="Cloudflare 公网入口" onSubmit={submit} aside={<StatusLabel tone={state.error ? 'error' : active ? 'progress' : 'neutral'}>
+    <Section id="tunnel" guide="tunnel" title="Cloudflare 公网入口" onSubmit={submit} aside={<StatusLabel tone={state.error ? 'error' : active ? 'progress' : 'neutral'}>
       {state.error ? '连接失败' : state.state === 'running' ? '运行中' : state.state === 'starting' ? '连接中' : '已停止'}</StatusLabel>}>
       <Stack>
         {state.named_available

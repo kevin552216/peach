@@ -17,9 +17,15 @@ describe('首页加载结构',()=>{
      const seen=new WeakSet<Element>();
      (window as any).__catalogSkeletons=0;
      (window as any).__catalogRatios=[];
+     (window as any).__catalogSkeletonHistory=[];
      new MutationObserver(()=>{document.querySelectorAll('#grid .catalog-skeleton').forEach(node=>{
       if(node.closest('[data-content-skeleton][aria-hidden="true"]')||getComputedStyle(node).visibility==='hidden')return;
       if(!seen.has(node)){seen.add(node);(window as any).__catalogSkeletons++;
+       const bounds=node.getBoundingClientRect(),style=getComputedStyle(node);
+       (window as any).__catalogSkeletonHistory.push({at:Math.round(performance.now()),
+        ratio:(node.querySelector('[style]') as HTMLElement)?.style.getPropertyValue('--skeleton-card-ratio'),
+        display:style.display,visibility:style.visibility,width:bounds.width,height:bounds.height,
+        contentSkeleton:node.closest('[data-content-skeleton]')?.outerHTML.slice(0,400)});
        (window as any).__catalogRatios.push(Number((node.querySelector('[style]') as HTMLElement)?.style.getPropertyValue('--skeleton-card-ratio')))}
      });
       if(!(window as any).__firstCard){
@@ -75,7 +81,8 @@ describe('首页加载结构',()=>{
      });
      assert.equal(colors.actual,colors.expected,'骨架圆角底色与占位层一致');
     }
-    assert.equal(await page.evaluate(()=>(window as any).__catalogSkeletons),1,'目录骨架只展示一轮');
+    assert.equal(await page.evaluate(()=>(window as any).__catalogSkeletons),1,
+     `目录骨架只展示一轮：${JSON.stringify(await page.evaluate(()=>(window as any).__catalogSkeletonHistory))}`);
     assert.deepEqual(await page.evaluate(()=>(window as any).__catalogRatios),[hasFeed?3/4:16/9]);
     release();
     if(hasFeed)await page.locator('#feedNew [data-feed-id]').first().waitFor({state:'visible'});

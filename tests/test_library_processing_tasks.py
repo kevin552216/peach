@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from contextlib import closing
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -29,8 +29,11 @@ class SelectedProcessingTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self.media = self.root / 'media'
         self.media.mkdir()
+        self.ledger_root = r'R:\SelectedMedia'
         self.config = PeachConfig(self.root, self.root / 'config.toml', present=True,
-                                 locations={'local': (str(self.media),)})
+                                 locations={'local': (self.ledger_root,)},
+                                 mounts={'local': (str(self.media),)})
+        self.enterContext(patch('peach.settings_file.active', return_value=self.config))
         self.config.directory('database').mkdir()
         self.db = fresh_ledger(self.root / 'database')
         self.database = LedgerDatabase(self.db)
@@ -45,7 +48,7 @@ class SelectedProcessingTests(unittest.TestCase):
                 video = self.media / f'ABW-358_{index + 1}.mp4'
                 video.write_bytes(b'video')
                 connection.execute("INSERT INTO asset(location,path,name,medium,size,code,duration,catalog_title) VALUES('local',?,?,'video',5,'ABW-358',?,?)",
-                                   (str(video), video.name, duration, title))
+                                   (str(PureWindowsPath(self.ledger_root) / video.name), video.name, duration, title))
 
     def run_selected(self, tasks, **options):
         return process_library(self.config, self.db, self.root / 'generated', self.root / 'covers',
@@ -430,17 +433,17 @@ class SelectedProcessingTests(unittest.TestCase):
         payload = copy.deepcopy(self.provider.query.return_value)
         def query(*args, **kwargs):
             queried.set()
-            self.assertTrue(media_done.wait(3))
+            self.assertTrue(media_done.wait(10), '资料查询应等到媒体问题已记录')
             return payload
         def preview(runner):
-            self.assertTrue(queried.wait(3))
+            self.assertTrue(queried.wait(10), '资料通道应进入来源查询')
             runner.issue(runner.rows[0], '生成预览图失败', action='generating_preview', retryable=True)
             media_done.set()
         self.provider.query.side_effect = query
         with patch('peach.library_processing_tasks.SelectedProcessing.do_previews', preview):
             result = self.run_selected(['metadata', 'previews'], execution_mode='parallel')
         self.assertEqual(result['status'], 'failed')
-        self.assertEqual(result['work_progress']['metadata']['failed'], 0)
+        self.assertEqual(result['work_progress']['metadata']['failed'], 0, result)
         self.assertEqual(result['work_progress']['previews']['failed'], 1)
         self.assertEqual(len(result['completed_metadata']), 1)
 

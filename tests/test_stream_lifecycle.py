@@ -326,13 +326,14 @@ class MediaResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service._generation_locks, {})
 
     async def test_early_file_disconnect_completes_the_application_middleware_stack(self):
-        stopped = asyncio.Event()
+        entered, stopped = asyncio.Event(), asyncio.Event()
 
         @self.app.get("/owned-stream")
         async def stream():
             return BufferedFileResponse(self.source)
 
         async def slow_headers(response, scope, receive, send):
+            entered.set()
             try:
                 await asyncio.Event().wait()
             finally:
@@ -342,6 +343,8 @@ class MediaResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(FileResponse, "__call__", slow_headers), \
                 mock.patch("peach.api._server_error_headers", return_value={"X-Peach-Error-ID": "test"}) as errors:
             task, messages, sent = self.request("/owned-stream")
+            # 路由首次准备与响应收尾分别计时；仍在任何响应头发出前断连。
+            await asyncio.wait_for(entered.wait(), 10)
             messages.put_nowait({"type": "http.disconnect"})
             try:
                 await asyncio.wait_for(task, 1)

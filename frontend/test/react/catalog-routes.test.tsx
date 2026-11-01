@@ -1,5 +1,5 @@
-/* 目录网格与垃圾队列由路由树画进 `#grid`（`CATALOG_ROUTES`）：冷启动的骨架经 `revealSkeleton` 抬成淡出层，与整页
- * 落在同一批变化里；壳认领表面只收 `#stats` 与 `#index`，`#grid` 上那一页留着；停在目录时壳经 `updateManagedRoute`
+/* 目录网格与垃圾队列由路由树画进 `#grid`（`CATALOG_ROUTES`）：页面挂载即取数，骨架与内容在变化区交叉淡化。
+ * 壳认领表面只收 `#stats` 与 `#index`，`#grid` 上那一页留着；停在目录时壳经 `updateManagedRoute`
  * 推选择态、版式与筛选，页面不重挂、代次不变，换筛选只按新键重取一次；垃圾队列一次清空骨架，收起时计数行那一格
  * 同步撤掉；壳那一份助手与动作原样交给页面；这些路径不交给 React Router。
  *
@@ -168,32 +168,32 @@ const cards = (grid: Element) => grid.querySelectorAll('.peach-react [data-media
 /** 页面画出来的那一块（宿主里的第一个元素）：重挂之后就换成另一个。 */
 const painted = (grid: Element) => grid.querySelector(':scope > .peach-react > *');
 
-it('冷启动深链首页：骨架淡出与整页在同一批变化里交接，中间没有空帧', async () => {
+it('冷启动深链首页由页面立即显示骨架，首屏取齐后交叉呈现内容', async () => {
   const r = await load('/');
-  const { grid, skeleton } = gridSurface();
+  const { grid } = gridSurface();
   await mount(r);
   const fetch = catalogFetch({ deferred: true });
-  const open = catalogOpen();
+  const open = catalogOpen({ skeletonHtml: () => GRID_SKELETON });
   const opened = r.openManagedRoute('/', open, { container: grid, isCurrent: () => true, place: revealRoutedPage });
   await until(() => fetch.calls('/api/items').length > 0, '首屏取数发出去');
-  expect(grid.firstElementChild, '取齐之前骨架原样留着').toBe(skeleton);
-  const batches: Array<{ bare: boolean; fading: boolean; painted: boolean; revealing: boolean }> = [];
+  expect(grid.querySelector('[data-content-transition]')?.getAttribute('aria-busy')).toBe('true');
+  expect(grid.querySelector('[data-content-skeleton] [data-skeleton]')).not.toBeNull();
+  const batches: Array<{ pending: boolean; painted: boolean }> = [];
   const observer = new MutationObserver(() => {
     batches.push({
-      bare: Boolean(grid.querySelector(':scope > .grid > [data-skeleton]')),
-      fading: Boolean(grid.querySelector(':scope > .skelfade [data-skeleton]')),
+      pending: Boolean(grid.querySelector('[data-content-transition][aria-busy="true"] [data-skeleton]')),
       painted: cards(grid).length === 3,
-      revealing: grid.classList.contains('skelreveal') && grid.classList.contains('revealing'),
     });
   });
-  observer.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  observer.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-busy'] });
   unmounts.push(() => observer.disconnect());
   fetch.resolve();
   await act(async () => { expect(await opened).toBe(true) });
-  expect(batches[0], '撤下骨架的那一批里，骨架已在淡出层、整页已经画好').toEqual(
-    { bare: false, fading: true, painted: true, revealing: true });
-  expect(batches.every((batch) => batch.bare || batch.fading || batch.painted), '任何一批都不是空的').toBe(true);
-  expect(grid.querySelector('.skelfade')?.firstElementChild, '淡出层里是原来那张骨架').toBe(skeleton);
+  await until(() => cards(grid).length === 3, '首屏内容就绪');
+  expect(batches.length).toBeGreaterThan(0);
+  expect(batches.every((batch) => batch.pending || batch.painted), '每一批变化都有占位或内容').toBe(true);
+  expect(grid.querySelector('[data-content-transition]')?.getAttribute('aria-busy')).toBe('false');
+  expect(grid.querySelector('[data-content-skeleton]')?.getAttribute('aria-hidden')).toBe('true');
   expect(fetch.calls('/api/items'), '首屏只取一次').toHaveLength(1);
   expect(open.settled).toHaveBeenCalledWith(0);
   expect(r.managedEntry(grid)).toMatchObject({ path: '/', props: { filters: { sort: 'seed' } } });
@@ -275,6 +275,7 @@ it('垃圾队列：换掉 `#grid` 上的网格，一次清空骨架，首屏由�
   await mount(r);
   const fetch = catalogFetch();
   await act(async () => { await r.openManagedRoute('/', catalogOpen(), { container: grid, isCurrent: () => true }) });
+  await until(() => cards(grid).length === 3, '目录首屏画上');
   expect(grid.querySelector('[data-media-sections]'), '先画着目录网格').not.toBeNull();
   const open = junkOpen();
   await act(async () => { expect(await r.openManagedRoute('/junk-files', open, { container: grid, isCurrent: () => true })).toBe(true) });

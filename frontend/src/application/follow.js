@@ -4,6 +4,7 @@ import { createFollowFeedHelpers } from '../react/follow-feed/follow-helpers';
 import { createFollowDetailActions } from '../react/follow-detail/follow-detail-actions';
 import { checkReceipt } from '../react/follow-manage/follow-manage';
 import { followScrollY } from '../shell';
+import { pageNavigationReady, rememberPageState } from '../history/page-navigation';
 /* follow 域控制器：本域状态与动作，启动由 Application 的生命周期统一安装。 */
 import { receiptsState } from './receipts.js';
 import { managedEntry, releaseManagedRoute, updateManagedRoute } from './../history/managed';
@@ -152,10 +153,14 @@ export function connectFollowController(){
       writeSession:patch=>writeShell({...(patch.discoverySeed===undefined?{}:{followDiscoverySeed:patch.discoverySeed}),
         ...(patch.revision===undefined?{}:{followRevision:patch.revision}),...(patch.scrollY===undefined?{}:{followScrollY:patch.scrollY})}),
       preferences:()=>({selectMode,selected:followSelected,photoSize:photoSize(),photoLayout:photoLayout(),imagesOnly:!!preferencesState.appSettings.followImagesOnly}),
-      live:followFeedLive,push:pushFollowFeed,route:navigationState.route,openPage:openRoutedPage,
+      live:followFeedLive,push:pushFollowFeed,route:path=>{
+        navigationState.route(path);
+        rememberPageState('follow',{view:followView(),seed:followDiscoverySeed,revision:followRevision});
+      },openPage:openRoutedPage,
       rollSeed:()=>Number(receiptsState.rollSeed()),enterSeed:()=>Math.floor(Math.random()*0xffffffff),
       revealFeed:()=>{releaseHoverPreviews();enterManagementSurface();showManagementBody({manage:false})},
-      syncPhotoWalls,scrollTop:()=>window.scrollTo({top:0,behavior:'smooth'}),
+      syncPhotoWalls,scrollTop:()=>{void pageNavigationReady(()=>location.pathname==='/follow',
+        $('#stats').querySelector('[data-filter-frame]'))},
     },followState.followFeedHelpers,followState.followFeedActions);
     followState.followFeedActions=followState.controller.actions;
     followState.followFeedProps=followState.controller.props;

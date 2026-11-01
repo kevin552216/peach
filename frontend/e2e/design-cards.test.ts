@@ -1,13 +1,38 @@
 /* 设计决定：作品卡、管理页与复核。读 `getComputedStyle` 断言用户定过的外观；共用的桩与浏览器生命周期在 `design-fixture.ts`。 */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { Browser, Locator } from 'playwright-core';
+import type { Browser, Locator, Page } from 'playwright-core';
 import { expectBody, settle, visit } from './harness.ts';
 import {
   DESKTOP, MOBILE, tokenColor, openReview, REVIEW_ROW, lightness, WIDE, JUNK_COUNT, openJunk, junkItem, openJunkWith,
   openCatalog, openCatalogFixture, openFollowManage, stubFollowManage, holdApi, controlFaces, disabledTokens,
   waitingActionFaces, assertDisabledFace, installDesignBrowser, PIXEL,
 } from './design-fixture.ts';
+
+/** 每个视口从未阅读的进度开始；账本跨设备持久化由 API 回归验证。 */
+async function freshTutorial(page: Page) {
+  const state = { version: 1, campaign: 'browser-tutorial', invited: false, completed: false,
+    chapters: {} as Record<string, { next: number; read: string[]; skipped: string[] }> };
+  await page.route('**/api/tutorial-progress', async route => {
+    if (route.request().method() === 'POST') {
+      const action = route.request().postDataJSON();
+      if (action.action === 'dismiss') state.invited = true;
+      else if (action.action === 'complete' || action.action === 'reopen') {
+        state.invited = true;
+        state.completed = action.action === 'complete';
+      } else {
+        const row = state.chapters[action.chapter] ??= { next: 0, read: [], skipped: [] };
+        row.next = action.next;
+        if (action.action === 'step') {
+          row.read = row.read.filter(step => step !== action.step);
+          row.skipped = row.skipped.filter(step => step !== action.step);
+          row[action.skipped ? 'skipped' : 'read'].push(action.step);
+        }
+      }
+    }
+    await route.fulfill({ json: state });
+  });
+}
 
 describe('设计决定：作品卡、管理页与复核', () => {
   let browser: Browser;
@@ -268,8 +293,10 @@ describe('设计决定：作品卡、管理页与复核', () => {
         return [Math.round(rect.top), Math.round(rect.height)];
       };
       const lede = document.querySelector<HTMLElement>('[data-manage-lede]');
-      const card = document.querySelector('#grid .catalog-skeleton .skeletoncard')
-        || document.querySelector('#grid [data-media-card][data-variant="resource"]');
+      const card = [...document.querySelectorAll(
+        '#grid .catalog-skeleton .skeletoncard, #grid [data-media-card][data-variant="resource"]',
+      )].find(node => !node.closest('[data-content-skeleton][aria-hidden="true"], [data-content-current][aria-hidden="true"]')
+        && getComputedStyle(node).visibility === 'visible') ?? null;
       /* 读数与「清空回收站」各自的竖直中线：两者说的是同一批文件，同在说明行一行里。 */
       const middle = (element: Element | null | undefined) => {
         if (!element) return null;
@@ -299,7 +326,7 @@ describe('设计决定：作品卡、管理页与复核', () => {
         `读数和清空键没并在说明行同一行：${JSON.stringify(landed.row)}`);
       assert.deepEqual(waiting.lede, landed.lede, `计数栏落地时位置或高度跳了：${JSON.stringify({ waiting, landed })}`);
       assert.deepEqual(waiting.card, landed.card, `回收站首张卡落地时位置或高度跳了：${JSON.stringify({ waiting, landed })}`);
-      /* 同一页重画（前进后退回到同一条 /trash）：读数接口还在路上时说明行留着上一次的读数，不再铺占位。 */
+      /* 同一历史条目保留读数和卡片，不重取也不重新铺占位。 */
       await page.evaluate(() => {
         const flags = window as unknown as { trashLedeFlashed?: boolean };
         flags.trashLedeFlashed = false;
@@ -307,17 +334,16 @@ describe('设计决定：作品卡、管理页与复核', () => {
           if (document.querySelector('[data-trash-lede-skeleton]')) flags.trashLedeFlashed = true;
         }).observe(document.querySelector('[data-manage-header]')!, { childList: true, subtree: true });
       });
-      const again = await holdApi(page);
-      const reread = page.waitForRequest((request) => {
+      const rereads: string[] = [];
+      page.on('request', request => {
         const url = new URL(request.url());
-        return url.pathname === '/api/items' && url.searchParams.get('state') === 'trash';
-      }, { timeout: 15_000 });
+        if (url.pathname === '/api/items' && url.searchParams.get('state') === 'trash') rereads.push(url.href);
+      });
       await page.evaluate(() => dispatchEvent(new PopStateEvent('popstate')));
-      await reread;
-      const holding = await measure();
-      again();
       await page.locator('#grid [data-media-card][data-variant="resource"]').first().waitFor({ timeout: 15_000 });
       await settle(page);
+      const holding = await measure();
+      assert.deepEqual(rereads, [], '同一历史条目重复取数');
       assert.deepEqual([holding.cells, holding.text], [[], landed.text], `同页重画时说明行回到了占位：${JSON.stringify(holding)}`);
       assert.equal(await page.evaluate(() => (window as unknown as { trashLedeFlashed?: boolean }).trashLedeFlashed), false,
         '同页重画期间说明行闪回了占位');
@@ -563,73 +589,156 @@ describe('设计决定：作品卡、管理页与复核', () => {
     }
   });
 
-  for (const [label, viewport, inset] of [['390px', MOBILE, 12], ['宽屏', DESKTOP, 24]] as const) {
-    it(`${label} 下教程浮窗贴着右下角，Toast 让到它上方，批量选择条盖在它上面`, { timeout: 60_000 }, async () => {
-      const opened = await visit(browser, '/', viewport);
+  for (const [label, viewport] of [['390px', MOBILE], ['宽屏', DESKTOP]] as const) {
+    it(`${label} 下教程中心可阅读、关闭与重开，不提交业务写入`, { timeout: 60_000 }, async () => {
+      const opened = await visit(browser, '/', viewport, freshTutorial);
       try {
-        await opened.page.evaluate(() => {
-          localStorage.setItem('peach.post-setup-tutorial.v1', 'pending');
-          localStorage.removeItem('peach.post-setup-tutorial-collapsed.v1');
-          localStorage.removeItem('peach.post-setup-tutorial-skipped.v1');
+        const page = opened.page;
+        await expectBody(page, '/', [page.locator('#grid')]);
+        await settle(page);
+        const writes: string[] = [];
+        const streams: string[] = [];
+        page.on('request', request => {
+          if (/^\/(?:stream|api\/stream-plan)/.test(new URL(request.url()).pathname)) streams.push(request.url());
+          if (new URL(request.url()).pathname === '/api/diagnostics/client-error' && request.postDataJSON()?.kind === 'context') return;
+          if (new URL(request.url()).pathname.startsWith('/api/') && new URL(request.url()).pathname !== '/api/tutorial-progress' && !['GET', 'HEAD'].includes(request.method())) {
+            writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+          }
         });
-        await opened.page.reload({ waitUntil: 'load' });
-        /* 目录网格画出来时 paintSelection 已经按当前页收好批量条的按钮；教程卡取数期间的
-           占位带 aria-busy，settle 等到的是最终那张卡。 */
-        await expectBody(opened.page, '/', [
-          opened.page.locator('#grid [data-media-card][data-id]').first(),
-          opened.page.locator('#postSetupTutorial .post-setup-notification'),
-        ]);
-        await settle(opened.page);
-        /* 批量条只在有选中项时才画：Ctrl 点两张卡进多选，再在浮条中心点取最上层元素。窄屏上它
-           横跨整行，一定落在教程卡上；宽屏上两者不在同一处，这一条只在窄屏量。 */
-        const cards = opened.page.locator('#grid [data-media-card][data-id]');
-        for (const at of [0, 1]) await cards.nth(at).click({ modifiers: ['Control'], position: { x: 20, y: 20 } });
-        await opened.page.locator('[data-batch-dock] [data-selection-dock]').waitFor({ timeout: 10_000 });
-        await settle(opened.page);
-        const probe = await opened.page.evaluate(() => {
-          const dock = document.querySelector('[data-batch-dock] [data-selection-dock]')!;
-          const tutorial = document.querySelector('#postSetupTutorial .post-setup-notification')!;
-          const card = tutorial.getBoundingClientRect();
-          const box = dock.getBoundingClientRect();
-          const x = box.left + box.width / 2;
-          const y = box.top + box.height / 2;
-          const top = document.elementFromPoint(x, y);
-          return { top: card.top, bottom: card.bottom, left: card.left, right: card.right,
-            dock: { overlaps: x >= card.left && x <= card.right && y >= card.top && y <= card.bottom,
-              tutorialOnTop: !!top && tutorial.contains(top) } };
-        });
-        assert.ok(Math.abs(probe.bottom - (viewport.height - inset)) <= 1,
-          `教程浮窗没有贴着右下角：下沿 ${probe.bottom}，应为 ${viewport.height - inset}`);
-        if (viewport.mobile) {
-          assert.ok(probe.dock.overlaps, '批量选择条的中心没落在教程浮窗上，这条判据没有量到重叠');
-          assert.ok(!probe.dock.tutorialOnTop, '教程浮窗盖住了批量选择条');
+        const opener = page.locator('#tutorialBtn');
+        await page.locator('.peach-guide-popover').getByRole('heading', { name: '从这里打开新手教程' }).waitFor();
+        assert.ok(await opener.evaluate(node => node.classList.contains('driver-active-element')));
+        await opener.click();
+        const dialog = page.getByRole('dialog', { name: '新手教程', exact: true });
+        await dialog.waitFor();
+        for (const name of ['开始使用', '界面导览', '设置导览']) {
+          await dialog.locator('label').filter({ has: page.getByRole('radio', { name, exact: true }) }).click();
+          assert.equal(await dialog.locator('[data-guide-banner]').count(), 1, `${name} 缺少共用引导区`);
+          assert.equal(await dialog.locator('[data-guide-banner] .peach-guide-topic-icon svg').count(), 1, `${name} 缺少图标`);
         }
-        assert.ok(probe.top >= 0 && probe.left >= 0 && probe.right <= viewport.width,
-          `教程浮窗越出了 ${viewport.width}px 视口`);
-
-        /* 回执走真的入口发一条不会自己消失的，等栈里每一条都进场停稳再量。演示库刚跑完扫描，
-           「扫描与资料采集已完成」随时可能也进栈，所以判据是栈里每一条都在卡上沿之上。 */
-        await opened.page.evaluate(async () => {
-          const entry = '/dist/peach-app.js';
-          const ui = await import(entry);
-          ui.showToast(document.getElementById('toasts'), { success: '', error: '' }, 'e2e-tutorial-lift',
-            { html: '已保存配置', alert: false, timeout: 0, action: null });
+        const box = await dialog.boundingBox();
+        assert.ok(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height,
+          '教程中心越出视口');
+        await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '设置导览', exact: true }) }).click();
+        const segments = await dialog.getByRole('radiogroup', { name: '教程路径' }).evaluate(node => {
+          const surface = node.querySelector('[data-moving-surface]')!;
+          const first = node.querySelector('label')!;
+          return { position: getComputedStyle(surface).position, inset: first.getBoundingClientRect().left - node.getBoundingClientRect().left };
         });
-        await opened.page.locator('#toasts [data-sonner-toast]').first().waitFor();
-        await opened.page.waitForFunction(() => [...document.querySelectorAll('#toasts [data-sonner-toast]')]
-          .every((node) => node.getAttribute('data-mounted') === 'true' && node.getAnimations().length === 0));
-        const stack = await opened.page.evaluate(() => {
-          const card = document.querySelector('#postSetupTutorial .post-setup-notification')!.getBoundingClientRect();
-          const boxes = [...document.querySelectorAll('#toasts [data-sonner-toast]')].map((node) => node.getBoundingClientRect());
-          return { cardTop: card.top, lowest: Math.max(...boxes.map((box) => box.bottom)),
-            highest: Math.min(...boxes.map((box) => box.top)) };
+        assert.equal(segments.position, 'absolute', '选中底板不应占据分段器的排列空间');
+        assert.ok(segments.inset <= 8, `首个选项前出现 ${segments.inset}px 空白`);
+        const scroller = dialog.locator('.peach-guide-body');
+        assert.equal(await scroller.evaluate(node => getComputedStyle(node).scrollbarWidth), 'none', '正文应使用共享覆盖式滚动条');
+        const headerTop = (await dialog.locator('header').boundingBox())!.y;
+        await scroller.evaluate(node => { node.scrollTop = node.scrollHeight });
+        assert.equal((await dialog.locator('header').boundingBox())!.y, headerTop, '标题栏随正文滚走了');
+        await dialog.getByRole('searchbox', { name: '搜索教程' }).fill('不存在的功能xyz');
+        await dialog.getByRole('heading', { name: '没有匹配的教程', exact: true }).waitFor();
+        await dialog.getByRole('button', { name: '关闭新手教程', exact: true }).click();
+        await dialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(() => document.activeElement === document.getElementById('tutorialBtn'));
+        await opener.click();
+        await dialog.waitFor();
+        const inside = (await dialog.locator('header').boundingBox())!;
+        await page.mouse.move(inside.x + 40, inside.y + 20);
+        await page.mouse.down();
+        await page.mouse.move(2, 2);
+        await page.mouse.up();
+        assert.ok(await dialog.isVisible(), '从正文拖到遮罩不应关闭教程');
+        await page.mouse.click(2, 2);
+        await dialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(() => document.activeElement === document.getElementById('tutorialBtn'));
+        await opener.click();
+        await dialog.waitFor();
+        await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '界面导览', exact: true }) }).click();
+        assert.equal(await dialog.locator('[data-guide-topic]').count(), 4);
+        await dialog.locator('[data-guide-topic="browse"] > details > summary').click();
+        await dialog.getByRole('button', { name: /找到并播放/ }).click();
+        await page.locator('.peach-guide-popover').waitFor();
+        assert.equal(await dialog.isVisible(), false, '章节点击后仍停留在中间介绍页');
+        const playbackGuide = page.locator('.peach-guide-popover');
+        for (let step = 0; step < 4; step += 1) await playbackGuide.getByRole('button', { name: '下一步', exact: true }).click();
+        await page.locator('#stage .vjs-control-bar.driver-active-element').waitFor();
+        assert.deepEqual(await page.locator('#stage video.vjs-tech').evaluate(video => ({ paused: (video as HTMLVideoElement).paused, src: (video as HTMLVideoElement).currentSrc })), { paused: true, src: '' });
+        await playbackGuide.getByRole('button', { name: '下一步', exact: true }).click();
+        await page.locator('#stage [data-player-subtitles].driver-active-element').waitFor();
+        await playbackGuide.locator('#driver-popover-description').click();
+        assert.equal(await page.locator('#stage .vjs-peach-settings-toggle').getAttribute('aria-expanded'), 'true', '点击说明关闭了正在讲解的菜单');
+        await page.waitForFunction(() => {
+          const panel = document.querySelector('.peach-guide-popover')?.getBoundingClientRect();
+          return document.querySelector('.driver-overlay')?.parentElement?.id === 'stage'
+            && panel && panel.left >= 0 && panel.right <= innerWidth && panel.top >= 0 && panel.bottom <= innerHeight;
         });
-        assert.ok(stack.lowest <= stack.cardTop,
-          `Toast 压在教程浮窗上：Toast 下沿 ${stack.lowest}，教程上沿 ${stack.cardTop}`);
-        assert.ok(stack.highest >= 0, `Toast 被顶出了视口：上沿 ${stack.highest}`);
-      } finally {
-        await opened.close();
-      }
+        await playbackGuide.getByRole('button', { name: '下一步', exact: true }).click();
+        await page.locator('#stage [data-local-playback-row].driver-active-element').waitFor();
+        await playbackGuide.getByRole('button', { name: '完成本章', exact: true }).click();
+        await page.locator('#stage[open]').waitFor({ state: 'hidden' });
+        assert.deepEqual(streams, [], '导览请求了视频正片');
+        await dialog.waitFor();
+        await dialog.getByRole('button', { name: '开始快速导览', exact: true }).click();
+        const guide = page.locator('.peach-guide-popover');
+        await guide.waitFor();
+        await settle(page, '.peach-guide-popover');
+        const guideBox = (await guide.boundingBox())!;
+        assert.ok(guideBox.x >= 8 && guideBox.x + guideBox.width <= viewport.width - 8, '导览说明卡贴住了视口边缘');
+        assert.ok(await guide.evaluate(node => node.contains(document.activeElement)), '导览焦点未停留在说明卡内');
+        const resized = viewport.width === 390 ? { width: 1280, height: 800 } : { width: 390, height: 844 };
+        await page.setViewportSize(resized);
+        await page.waitForFunction(() => {
+          const box = document.querySelector('.peach-guide-popover')?.getBoundingClientRect();
+          const target = document.querySelector('.driver-active-element')?.getBoundingClientRect();
+          return box && target && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+            && target.width > 0 && target.right > 0 && target.left < innerWidth;
+        });
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.mouse.click(2, viewport.height - 2);
+        await guide.waitFor({ state: 'hidden' });
+        await dialog.waitFor();
+        await dialog.getByRole('button', { name: '继续快速导览', exact: true }).click();
+        await guide.waitFor();
+        await page.keyboard.press('Escape');
+        await guide.waitFor({ state: 'hidden' });
+        await dialog.waitFor();
+        await dialog.getByRole('button', { name: '继续快速导览', exact: true }).click();
+        await guide.getByRole('button', { name: '跳过本章', exact: true }).click();
+        await dialog.waitFor();
+        assert.equal(await guide.isVisible(), false, '跳过本章后仍停在步骤中');
+        assert.equal(await dialog.locator('[data-guide-banner][data-guide-completed]').count(), 0, '跳过误记为完成');
+        await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '设置导览', exact: true }) }).click();
+        await dialog.getByRole('button', { name: '了解常用设置', exact: true }).click();
+        await guide.waitFor();
+        for (let step = 0; step < 4; step += 1) await guide.getByRole('button', { name: '下一步', exact: true }).click();
+        await guide.getByRole('button', { name: '完成本章', exact: true }).click();
+        await dialog.waitFor();
+        await page.locator('#settingsPanel').waitFor({ state: 'hidden' });
+        assert.equal(new URL(page.url()).pathname, '/', '设置导览完成后未返回开始前的页面');
+        assert.ok(await dialog.getByRole('radio', { name: '设置导览', exact: true }).isChecked());
+        await dialog.getByRole('searchbox', { name: '搜索教程' }).fill('媒体库');
+        await dialog.getByRole('button', { name: /媒体库与入库 媒体库/ }).click();
+        await guide.waitFor();
+        for (let step = 0; step < 8; step += 1) await guide.getByRole('button', { name: '下一步', exact: true }).click();
+        await guide.getByRole('button', { name: '完成本章', exact: true }).click();
+        await dialog.waitFor();
+        assert.equal(new URL(page.url()).pathname, '/', '页面导览完成后未返回开始前的页面');
+        assert.ok(await dialog.getByRole('searchbox', { name: '搜索教程' }).isVisible());
+        await dialog.locator('label').filter({ has: page.getByRole('radio', { name: '界面导览', exact: true }) }).click();
+        await dialog.getByRole('button', { name: '继续快速导览', exact: true }).click();
+        for (let step = 0; step < 3; step += 1) await guide.getByRole('button', { name: '下一步', exact: true }).click();
+        await guide.getByRole('button', { name: '完成本章', exact: true }).click();
+        await dialog.waitFor();
+        await opener.waitFor({ state: 'hidden' });
+        assert.ok(await dialog.getByRole('button', { name: '再看一遍', exact: true }).isVisible());
+        assert.equal(await dialog.locator('[data-guide-banner][data-guide-completed]').count(), 1);
+        await page.reload();
+        await page.locator('#grid').waitFor();
+        assert.equal(await opener.isVisible(), false, '完成快速导览后刷新又显示了教程按钮');
+        await page.goto(new URL('/settings/maintenance', page.url()).href);
+        await page.getByRole('region', { name: '新手教程', exact: true }).getByRole('button', { name: '重新打开', exact: true }).click();
+        await dialog.waitFor();
+        assert.equal(await opener.evaluate(node => (node as HTMLElement).hidden), false, '设置重新打开后没有恢复右上角入口');
+        assert.deepEqual(writes, [], '只读教程触发了业务写入');
+        assert.deepEqual(opened.problems, []);
+      } finally { await opened.close() }
     });
   }
 

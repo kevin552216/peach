@@ -56,6 +56,12 @@ export function initBoardTooltip() {
   tip.popover = 'manual'; tip.hidden = true; document.body.append(tip);
   let target: HTMLElement | null = null, title = '', described: string | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
+  let enteringEditor = false;
+  const editableTip = () => tip.hasAttribute('data-copy-key') && Boolean(document.querySelector('[data-copy-bar]'));
+  const editingTip = () => editableTip() && (enteringEditor
+    || Boolean(tip.querySelector('[data-copy-inline],[contenteditable]'))
+    || Boolean(document.querySelector('[data-copy-choice],[data-copy-bar][aria-busy="true"]')));
   const place = (next: HTMLElement) => {
     const rect = anchorRect(next), box = tip.getBoundingClientRect();
     if (!rect) return;
@@ -63,7 +69,11 @@ export function initBoardTooltip() {
     tip.style.top = `${rect.top >= box.height + 16 ? rect.top - box.height - 8 : Math.min(innerHeight - box.height - 8, rect.bottom + 8)}px`;
   };
   const hide = () => {
-    clearTimeout(timer); if (tip.matches(':popover-open')) tip.hidePopover(); tip.hidden = true;
+    clearTimeout(exitTimer);
+    if (editingTip()) return;
+    clearTimeout(timer);
+    if (tip.matches(':popover-open')) tip.hidePopover(); tip.hidden = true;
+    tip.removeAttribute('data-copy-key');
     if (target) {
       if (!target.hasAttribute('title')) target.title = title;
       if (described === null) target.removeAttribute('aria-describedby');
@@ -72,6 +82,7 @@ export function initBoardTooltip() {
     target = null;
   };
   const show = (node: EventTarget | null, delay: number) => {
+    if (editingTip()) return;
     if (!(node instanceof Element)) return;
     const next = node.closest<HTMLElement>('[title]');
     if (target?.contains(node) && (!next || next.contains(target))) return;
@@ -82,15 +93,41 @@ export function initBoardTooltip() {
     timer = setTimeout(() => {
       if (target !== next || !next.isConnected || !anchorRect(next)) return;
       (next.closest('dialog[open]') ?? document.body).append(tip);
-      tip.textContent = title; tip.hidden = false; tip.showPopover(); place(next);
+      tip.textContent = title;
+      const copyKey = next.getAttribute('data-tooltip-copy-key');
+      if (copyKey) tip.setAttribute('data-copy-key', copyKey);
+      else tip.removeAttribute('data-copy-key');
+      tip.style.pointerEvents = editableTip() ? 'auto' : '';
+      tip.hidden = false; tip.showPopover(); place(next);
       next.setAttribute('aria-describedby', [described, tip.id].filter(Boolean).join(' '));
     }, delay);
   };
-  document.addEventListener('pointerover', event => show(event.target, 400));
-  document.addEventListener('pointerout', event => { if (target && !target.contains(event.relatedTarget as Node | null)) hide() });
+  document.addEventListener('pointerover', event => {
+    if (editableTip()) {
+      if (target?.contains(event.target as Node)) clearTimeout(exitTimer);
+      if (tip.contains(event.target as Node)) { clearTimeout(exitTimer); return; }
+    }
+    show(event.target, 400);
+  });
+  document.addEventListener('pointerout', event => {
+    if (!target || target.contains(event.relatedTarget as Node | null)) return;
+    if (editableTip()) {
+      if (tip.contains(event.relatedTarget as Node | null) || editingTip()) return;
+      clearTimeout(exitTimer); exitTimer = setTimeout(hide, 250);
+    } else hide();
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!editableTip() || !tip.contains(event.target as Node)) return;
+    enteringEditor = true;
+    clearTimeout(exitTimer);
+    setTimeout(() => { enteringEditor = false }, 0);
+  }, true);
   document.addEventListener('focusin', event => show(event.target, 0));
-  document.addEventListener('focusout', hide);
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') hide() });
+  document.addEventListener('focusout', event => {
+    if (editableTip() && (tip.contains(event.relatedTarget as Node | null) || editingTip())) return;
+    hide();
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !editingTip()) hide() });
   document.addEventListener('scroll', event => {
     if (!target || !scrollMovesAnchor(event, target)) return;
     const rect = anchorRect(target);

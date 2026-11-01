@@ -17,7 +17,7 @@ import { useLocation } from 'react-router';
 import { appSettingsStore } from '@peach/appearance';
 import { followManageParams } from '../../follow-manage/manage-route';
 import {
-  isOverlayPath, managedEntry, openManagedRoute, peachHistory, releaseManagedRoute, shellNavigate,
+  isOverlayPath, managedEntry, openManagedRoute, peachHistory, shellNavigate,
   configurationSection, updateManagedRoute,
 } from '@peach/history';
 import { api, isAbort } from '@peach/legacy/core';
@@ -25,8 +25,8 @@ import {
   cameFromSetup, configurationRequestedSection, pageOpens, state, subscribeShell, writeShell,
 } from '@peach/shell';
 
+import { pageNavigationReady } from '../../../history/page-navigation';
 import { managementSkeletonHtml, paintManagementPlaceholder } from '../../../management-placeholder';
-import { routeScrollBehavior, scrollToAnchor } from '../../../ui-kit/anchor-scroll';
 import { isReviewCategory, reviewQueueOf } from '../../review/review';
 import { javLibraryPath, javTab } from '../../jav/jav';
 import { ShellActionsContext, useOpenEpoch } from '../router';
@@ -54,14 +54,6 @@ const useRoutingStarted = (): boolean => useSyncExternalStore(subscribeShell, re
 
 const followLayout = (): string => (appSettingsStore().value.followLayout === 'table' ? 'table' : 'default');
 const search = (): URLSearchParams => new URLSearchParams(window.location.search);
-
-/** 这一页的骨架：关注管理照偏好里的视图与地址上的排序画。 */
-function placeholder(path: ManagedPath): string {
-  const params = search();
-  return managementSkeletonHtml(path, {
-    followLayout: followLayout(), followSort: params.get('sort') || '', followDir: params.get('dir') || '',
-  });
-}
 
 /** 只读态：中止了回 null，照只能浏览以外的缺省处理。 */
 function readRuntime(run: Run): Promise<Runtime | null> {
@@ -114,9 +106,6 @@ async function openProps(path: ManagedPath, run: Run): Promise<object | null> {
   return {};
 }
 
-const scrollTop = (): void => { window.scrollTo({ top: 0, behavior: routeScrollBehavior() }) };
-const SCROLL_TOP = new Set<ManagedPath>(['/stats', '/taste', '/review', '/quality-goals', '/tasks', '/subscriptions']);
-
 async function openPage(path: ManagedPath, actions: ShellActions, run: Run): Promise<void> {
   const seq = peachHistory.navigation.seq;
   const isCurrent = () => run.live && peachHistory.navigation.seq === seq;
@@ -131,8 +120,11 @@ async function openPage(path: ManagedPath, actions: ShellActions, run: Run): Pro
   }
   const stats = document.getElementById('stats');
   if (!stats) return;
-  if (path === '/jav') window.scrollTo({ top: 0, behavior: 'instant' });
   actions.surfaceChanged('management', path);
+  paintManagementPlaceholder(stats, managementSkeletonHtml(path, {
+    followLayout: followLayout(), followSort: search().get('sort') || '', followDir: search().get('dir') || '',
+  }));
+  void pageNavigationReady(isCurrent, stats, { pending: true });
   if (path === '/taste') {
     writeShell({
       state: {
@@ -142,10 +134,9 @@ async function openPage(path: ManagedPath, actions: ShellActions, run: Run): Pro
     });
     actions.clearSearch();
   }
-  paintManagementPlaceholder(stats, placeholder(path));
   const props = await openProps(path, run);
   if (!props) return;
-  const opened = await openManagedRoute(path, props, { container: stats, isCurrent: () => run.live });
+  const opened = await openManagedRoute(path, props, { container: stats, isCurrent });
   if (opened) run.revision = managedEntry(stats)?.revision ?? 0;
   /* 配置页选中的页签只交给画上的那一次：没画上（取数途中走开了）就留给下一次打开。 */
   if (path.startsWith('/settings/') && opened) writeShell({ configurationRequestedSection: '' });
@@ -153,10 +144,8 @@ async function openPage(path: ManagedPath, actions: ShellActions, run: Run): Pro
     const { hash } = window.location;
     if (path === '/settings/library' && hash === '#libraryProcessing') {
       queueMicrotask(() => { if (isCurrent()) shellNavigate('/data-cleanup#libraryProcessing', { replace: true, state: null }) });
-    } else if (hash) {
-      void scrollToAnchor(hash, isCurrent);
-    } else if (SCROLL_TOP.has(path) || path === '/settings/library') {
-      scrollTop();
+    } else {
+      void pageNavigationReady(isCurrent);
     }
   }
 }
@@ -198,15 +187,11 @@ function ManagedPage({ path, covered }: { path: ManagedPath; covered: boolean })
     if (!current) return;
     current.live = false;
     current.controller.abort();
-    const stats = document.getElementById('stats');
-    queueMicrotask(() => {
-      if (stats && current.revision && !stats.hidden && managedEntry(stats)?.revision === current.revision) releaseManagedRoute(stats);
-    });
   }, []);
   return null;
 }
 
-/** 旧直达地址 `/resource-sync`：改写成数据管理页的资源同步锚点，不加历史条目，再由数据管理页的元素打开。 */
+/** 资源同步的旧直达地址转到二级页，不增加历史条目。 */
 export function ResourceSyncRedirect() {
   const started = useRoutingStarted();
   const done = useRef(false);
@@ -216,7 +201,7 @@ export function ResourceSyncRedirect() {
     let live = true;
     queueMicrotask(() => {
       if (!live) return;
-      shellNavigate('/data-cleanup#resource-sync', { replace: true });
+      shellNavigate('/data-cleanup/resource-sync', { replace: true });
     });
     return () => { live = false };
   }, [started]);

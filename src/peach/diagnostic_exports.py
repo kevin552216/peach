@@ -9,10 +9,10 @@ from .scraping_diagnostics import ExportCancelled, selected_codes
 
 
 class DiagnosticExports:
-    def __init__(self, config):
+    def __init__(self, config, *, runs=None):
         self.config = config
         self.root = config.directory('generated') / 'diagnostic-exports'
-        self.job = BackgroundJob('PeachDiagnosticExport')
+        self.job = BackgroundJob('PeachDiagnosticExport', task_key='diagnostic-export', runs=runs)
         self.lock = threading.Lock()
         self.cancelled = threading.Event()
 
@@ -77,6 +77,8 @@ class DiagnosticExports:
             if state['status'] in ('running', 'cancelling'):
                 self.cancelled.set()
                 state.update(status='cancelling', stage='正在取消导出')
+        if self.job.runs is not None:
+            self.job.stop(resume=False)
         return self.snapshot()
 
     def download(self, identity):
@@ -97,5 +99,6 @@ def manager(request):
     with _MANAGER_LOCK:
         state = request.app.state
         if not hasattr(state, 'diagnostic_exports'):
-            state.diagnostic_exports = DiagnosticExports(settings_file.load_config())
+            state.diagnostic_exports = DiagnosticExports(settings_file.load_config(),
+                                                         runs=state.web_contract.task_runs)
         return state.diagnostic_exports

@@ -1590,6 +1590,28 @@ def restart_tray_process(
     )
 
 
+_MACOS_DIAGNOSTICS_LOCK = threading.Lock()
+
+
+def export_macos_diagnostics(notify: Callable[[str, str], None]) -> None:
+    """与 Windows 托盘同一份报告；保存后在访达里选中它，不另做结果窗口。"""
+    if not _MACOS_DIAGNOSTICS_LOCK.acquire(blocking=False):
+        return
+
+    def work() -> None:
+        from .support_bundle import save_bundle
+        try:
+            path = save_bundle()
+            subprocess.run(["open", "-R", str(path)], check=False)
+            notify(f"诊断报告已保存：{path.name}", "Peach 诊断报告")
+        except Exception as error:
+            notify(error_reporting.failure_details("report-export", error), "Peach 诊断报告")
+        finally:
+            _MACOS_DIAGNOSTICS_LOCK.release()
+
+    threading.Thread(target=work, name="PeachDiagnostics", daemon=True).start()
+
+
 def run_macos_menu_bar(manager: "ServiceManager", gate: "SetupGate | None" = None, *, silent: bool = False, show_browser: bool = False) -> None:
     """macOS 走原生菜单栏项。
 
@@ -1690,6 +1712,21 @@ def run_macos_menu_bar(manager: "ServiceManager", gate: "SetupGate | None" = Non
     def open_configuration() -> None:
         webbrowser.open(gate.open_url() + "configuration")
 
+    def check_updates() -> None:
+        if not action_lock.acquire(blocking=False):
+            return
+
+        def work() -> None:
+            try:
+                notify("正在检查更新…", "Peach")
+                result = versions.check()
+                state["snapshot"] = result.snapshot
+                notify(result.message, "Peach 版本与更新")
+            finally:
+                action_lock.release()
+
+        threading.Thread(target=work, name="PeachUpdate", daemon=True).start()
+
     menu = MenuBarApp(
         create_icon(template=True),
         "Peach · 蜜桃",
@@ -1706,10 +1743,13 @@ def run_macos_menu_bar(manager: "ServiceManager", gate: "SetupGate | None" = Non
                 lambda label, action: (label, action), sync_ledger, take_ownership),
             ("重启服务", restart),
             ("查看日志", lambda: subprocess.run(["open", str(LOG_DIR)], check=False)),
-            ("版本信息", Submenu(lambda: [
+            ("导出诊断报告", lambda: export_macos_diagnostics(notify)),
+            ("版本与更新", Submenu(lambda: [
                 (f"Peach {state['snapshot'].package_version}", None),
                 (menu_text(state['snapshot'].build_label), None),
                 (menu_text(state['snapshot'].channel_label), None),
+                (None, None),
+                ("检查更新", check_updates),
             ])),
             (None, None),
             ("退出 Peach", quit_now),

@@ -8,16 +8,15 @@
  * - 详情压在上面：条目记了背景（页面组按背景匹配）就什么都不做，下面那一页一直画着；没有背景时补画一次目录网格
  *   （`ShellActions.catalog.fill`），详情下面不留一张永远在读的骨架。
  * - 壳要求按当前地址从头重开（`pageOpens` 加一：启动、深链详情关掉补画来处、从管理条进回收站）：整页打开。
- * - 领了新的页面打开序号（后退前进、不认领的跳转）：整页打开；后退前进从别处回到首页时作废顶部三层的缓存、重掷取样种子，
- *   在目录里换来换去沿用这一粒。地址上写了 `seed` 就用它。
+ * - 领了新的页面打开序号（后退前进、不认领的跳转）：整页打开；历史返回沿用条目保存的筛选与种子，
+ *   没有记录时按地址重建。地址上写了 `seed` 就用它。
  * - 壳认领写了地址（换筛选、换排序、换一批、回首页）：筛选已经由壳写进 `state`，只重取；关掉详情回到压着的那一份
  *   地址、筛选也没变时不重取。这一页要是还没开过（后退落到压在别处之上的详情，挂上时就被盖着），整页打开。
  * `pageOpens` 还是 0 时壳没开始路由，元素只挂着。挂上那一刻按那一次历史变化认没认领分别算作后两种；路由根晚于
  * 壳开始路由才装上时，挂上那一刻算第一种。
  *
- * `?state=ads` 落在首页上时不打开，改写成垃圾文件的地址（不加条目），由垃圾文件那一页的元素接着打开。卸载时去处
- * 不是目录、详情、沉浸或资料页，就收起 `#grid` 与首页新作行：这些页面离开目录也留着它们。判断、改写与收起
- * 都排进微任务：路由根在历史变化的同一次调用里同步提交，壳订阅历史早于路由根，它写标题与侧栏的那一轮排在前面。 */
+ * `?state=ads` 落在首页上时不打开，改写成垃圾文件的地址（不加条目），由垃圾文件那一页的元素接着打开。
+ * 目标页立即展示变化区域的等待态，稳定控件不重挂。判断与改写排进微任务，避开路由根的提交阶段。 */
 import { useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router';
@@ -29,9 +28,9 @@ import { pageOpens, state, subscribeShell, writeShell, type CatalogFilters } fro
 
 import { junkPath, junkRoute } from '../../../junk-queue';
 import { sortFromAddress } from '../../../sort-preferences';
+import { pageNavigationReady, rememberPageState, restoredPageState, restoringPage } from '../../../history/page-navigation';
 import { ShellActionsContext, useOpenEpoch } from '../router';
 import type { CatalogShell, ShellActions } from '../shell-actions';
-import { entityTarget } from './index-entity';
 import { JavLibraryHeader } from '../../jav/jav-header';
 import { CatalogFolders } from '../../catalog-folders/catalog-folders-page';
 
@@ -78,6 +77,8 @@ function seen(opened: boolean): Seen {
 /** 按地址重建的目录筛选，同壳启动时那一份的写法；回收站只钉死状态、清掉别的筛选。产地与缩略图不随地址重读。 */
 function filtersAt(pathname: string, search: string, entering: boolean, shell: CatalogShell): CatalogFilters {
   const previous: CatalogFilters = { ...state };
+  const restored = restoredPageState<CatalogFilters>('catalog');
+  if (restored) return { ...restored };
   if (pathname === '/trash') return { ...previous, creator: '', studio: '', tag: '', orient: '', state: 'trash', q: '' };
   const params = new URLSearchParams(search);
   const { defaultSort, defaultSortDirection } = appSettingsStore().value;
@@ -99,6 +100,17 @@ function filtersAt(pathname: string, search: string, entering: boolean, shell: C
   };
 }
 
+/** 点击后先展示目标骨架并按页面定位；历史恢复等已加载分页落地后再定位。 */
+function openCatalog(load: () => void | Promise<void>): void {
+  const seq = peachHistory.navigation.seq;
+  rememberPageState('catalog', { ...state });
+  const loading = load();
+  const current = () => peachHistory.navigation.seq === seq;
+  const results = () => document.querySelector('#grid');
+  void pageNavigationReady(current, results(), { pending: true });
+  void Promise.resolve(loading).then(() => pageNavigationReady(current, results()));
+}
+
 /** 判断这一轮做哪一件，做掉；`mark` 换成这一刻。 */
 function settle(mark: Seen, actions: ShellActions): void {
   const was = { ...mark };
@@ -114,7 +126,7 @@ function settle(mark: Seen, actions: ShellActions): void {
   if (now.opens === was.opens) {
     if (now.epoch === was.epoch && was.opened) {
       if (now.seq === was.seq || (was.covered && now.address === was.address && now.filters === was.filters)) return;
-      shell.load();
+      openCatalog(() => shell.load());
       return;
     }
     if (now.epoch !== was.epoch) entering = peachHistory.navigation.action === 'POP' && last.from !== '/';
@@ -128,16 +140,10 @@ function settle(mark: Seen, actions: ShellActions): void {
   }
   const retitle = junkRedirect;
   junkRedirect = false;
-  entering &&= pathname === '/';
+  entering &&= pathname === '/' && !restoringPage();
   mark.opened = true;
   writeShell({ state: filtersAt(pathname, search, entering, shell) });
-  shell.open(pathname, { entering, retitle });
-}
-
-/* 去处还画着目录的东西就不收：目录几页之间换页由壳接着画；详情与沉浸压在上面；资料页铺开时只藏起它们。 */
-function keepsCatalog(pathname: string): boolean {
-  return isCatalogPath(pathname) || pathname === '/trash' || isOverlayPath(pathname) || pathname === '/immerse'
-    || !!entityTarget(pathname);
+  openCatalog(() => shell.open(pathname, { entering, retitle }));
 }
 
 function CatalogOpen() {
@@ -160,9 +166,6 @@ function CatalogOpen() {
     mark.current = now;
     return () => {
       own.mounted = false;
-      queueMicrotask(() => {
-        if (actions?.catalog && !keepsCatalog(peachHistory.navigation.location.pathname)) actions.catalog.release();
-      });
     };
     // 每次挂上只登记一次；之后的变化由下面那一格排进微任务。
   }, []);
@@ -181,7 +184,7 @@ function CatalogOpen() {
 /** 目录六条路径共用的元素：首页、三个筛选态与回收站一个 key，垃圾文件另一个；页面组按背景匹配时取背景那一页。
  *  覆盖地址的参数不是数字（`/assets/abc`）时什么都不挂：那不是一条详情，下面也不补画。 */
 export function CatalogMatch() {
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
   useLayoutEffect(() => {
     if (pathname !== '/wall') return;
     document.body.setAttribute('data-wall-open', '');
@@ -194,19 +197,17 @@ export function CatalogMatch() {
       chrome.forEach((node, index) => { node.inert = inert[index] || false });
     };
   }, [pathname]);
-  const actions = useContext(ShellActionsContext);
-  const host = document.getElementById('javLibraryHeader');
-  const jav = isCatalogPath(pathname) && new URLSearchParams(search).get('jav') === '1';
-  useLayoutEffect(() => {
-    if (!host) return;
-    host.hidden = !jav;
-    return () => { host.hidden = true };
-  }, [host, jav]);
   if (isOverlayPath(pathname) && !overlayTarget(pathname)) return null;
   return <>
     <CatalogOpen key={pathname === '/junk-files' ? '/junk-files' : '/'} />
     {isCatalogPath(pathname) ? <CatalogFolders /> : null}
-    {jav && host && actions ? createPortal(<JavLibraryHeader navigate={actions.navigate}
-      receipt={message => actions.receipt(message)} />, host) : null}
   </>;
+}
+
+/** JAV 页头常驻；壳在目标内容提交时切换显隐，路由取数期间不拆掉旧页头。 */
+export function CatalogChrome() {
+  const actions = useContext(ShellActionsContext);
+  const host = document.getElementById('javLibraryHeader');
+  return host && actions ? createPortal(<JavLibraryHeader navigate={actions.navigate}
+    receipt={message => actions.receipt(message)} />, host) : null;
 }

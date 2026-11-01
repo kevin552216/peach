@@ -36,6 +36,7 @@ from .sources.base import (COOLDOWN_ACTIONS, REASON_KINDS, FailureReason, SiteCo
                            SourceFailure)
 from .user_agent import USER_AGENT
 from .settings_file import PROJECT_ROOT
+from .task_control import run as run_task_process
 
 AMANE_REPOSITORY = "https://github.com/sqzw-x/amane"
 AMANE_LICENSE = "GPL-3.0"
@@ -270,10 +271,12 @@ def bundle_problem(root: Path = BRIDGE_ROOT) -> str:
     return ""
 
 
-def rebuild(tools_root: Path, *, runner: Runner = subprocess.run, timeout: int = 900,
+def rebuild(tools_root: Path, *, runner: Runner = run_task_process, timeout: int = 900,
             root: Path = BRIDGE_ROOT, proxy_options: Mapping[str, object] | None = None,
             force: bool = True) -> dict:
     """重建桥 venv，返回给设置页的回执。首次要下载约 98 MB，之后只校验。"""
+    from .task_resources import unobserved_network
+    unobserved_network('独立采集工具的网络传输未提供逐任务计量')
     if packaged_runtime(root=root):
         return {"ok": True, "result": "采集工具已随 Peach 安装，无需另行准备",
                 **describe(tools_root, root=root)}
@@ -338,7 +341,7 @@ def _rebuild(tools_root, *, runner, timeout, root, proxy_options):
             **describe(tools_root, root=root)}
 
 
-def ensure(tools_root: Path, *, runner: Runner = subprocess.run,
+def ensure(tools_root: Path, *, runner: Runner = run_task_process,
            proxy_options: Mapping[str, object] | None = None, secrets_root: Path | None = None,
            progress=lambda: None) -> None:
     """按锁准备一次独立运行环境；安装失败由调用方保留尚未处理的范围。"""
@@ -446,11 +449,11 @@ class AmaneBridge:
     python: Path
     script: Path | None = BRIDGE_SCRIPT
     timeout: int = DEFAULT_TIMEOUT
-    runner: Runner = subprocess.run
+    runner: Runner = run_task_process
 
     @classmethod
     def create(cls, tools_root: Path, *, timeout: int = DEFAULT_TIMEOUT,
-               runner: Runner = subprocess.run) -> "AmaneBridge":
+               runner: Runner = run_task_process) -> "AmaneBridge":
         packaged = packaged_runtime()
         if packaged:
             return cls(packaged[0], script=None if packaged[1] == "executable" else BRIDGE_SCRIPT,

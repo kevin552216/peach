@@ -501,6 +501,8 @@ describe('播放墙的浏览与详情', () => {
       await page.getByRole('button', { name: '详情', exact: true }).click();
       await page.locator('#stage[open] [data-item-side]').waitFor();
       await page.keyboard.press('Escape'); await page.locator('#stage[open]').waitFor({ state: 'hidden' });
+      await page.waitForURL(url => url.pathname === '/wall');
+      await page.locator('[data-video-wall]').waitFor({ state: 'visible' });
       await page.locator('[data-wall-tile]').first().waitFor();
       await page.evaluate(async () => {
         for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);

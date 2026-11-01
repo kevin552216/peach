@@ -54,7 +54,7 @@ export function PolicyLegend() {
 /** 标题行里的处理方式下拉：弹层顶部写明在选什么，每档带一句话；收起时只显示档名。 */
 export function PresetSelect({ name, value, onChange }: { name: string; value: Preset; onChange(value: Preset): void }) {
   return (
-    <Select className="w-full" aria-label={`${name} 处理方式`} selectedKey={value} prefix="处理方式"
+    <Select data-guide-target="library-policy" className="w-full" aria-label={`${name} 处理方式`} selectedKey={value} prefix="处理方式"
       renderValue={<span className="truncate">{PRESETS.find(([key]) => key === value)?.[1]}</span>}
       onSelectionChange={key => onChange(String(key) as Preset)}>
       {PRESETS.map(([key, label, hint]) => (

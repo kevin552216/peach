@@ -544,70 +544,77 @@ def w_batch(contract: WebContract, body):
     run = contract.task_runs.start("batch", trigger="manual", total=len(ids),
                                    label=BATCH_LABELS.get(operation, operation))
     handle = TaskRunHandle(contract.task_runs, run.id if run else None)
+    from .task_control import bind, Cancelled
     try:
-        with contract.write_transaction() as connection:
-            found = connection.execute(
-                f"SELECT id,path,snapshot_path,disposal,disposal_reason,location FROM asset WHERE id IN ({marks})", ids,
-            ).fetchall()
-            valid_ids = [row["id"] for row in found]
-            if not valid_ids:
-                raise ValueError("assets not found")
-            _reject_ineligible_targets(operation, found)
-            now = time.time()
-            if operation in {"restore", "seen", "dispose"}:
-                state_receipt = _write_batch_state(connection, found, operation, now, disposal_reason)
-            elif operation == "delete":
-                # 已消失的行文件本来就不在了，只删账本行；文件又回到盘上的那几条留着，
-                # 下一轮扫描会把它们接回在库。选中里有一条已消失的，整批都按这条口径删。
-                purge_outcome = purge_assets(
-                    connection, found, missing_only=any(row["disposal"] == VANISHED for row in found))
-            elif operation == "dismiss-junk":
-                connection.executemany(
-                    "INSERT INTO review_decision(category,item_key,status,note,updated_at) "
-                    "VALUES('junk_file',?,'rejected','用户确认不是垃圾',?) "
-                    "ON CONFLICT(category,item_key) DO UPDATE SET "
-                    "status='rejected',note=excluded.note,updated_at=excluded.updated_at",
-                    [(str(asset_id), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)))
-                     for asset_id in valid_ids],
-                )
-            elif operation == "reconsider-junk":
-                connection.executemany(
-                    "DELETE FROM review_decision WHERE category='junk_file' AND item_key=?",
-                    [(str(asset_id),) for asset_id in valid_ids],
-                )
-            elif operation == "region":
-                # 走 `write_owned_fields` 而不是直接 UPDATE：产地是真相字段，用户这一
-                # 笔要压得住后面每一轮刮削与推断，归属列是它唯一的凭据。
-                write_owned_fields(connection, valid_ids,
-                                   {"region": region_value}, USER_MANUAL)
-            elif operation == "later":
-                connection.executemany(
-                    "INSERT OR IGNORE INTO watch_queue(profile_id,asset_id,added_at,source) "
-                    f"VALUES('{DEFAULT_PROFILE_ID}',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'web-batch')",
-                    [(asset_id,) for asset_id in valid_ids],
-                )
-            else:
-                connection.executemany(
-                    "INSERT INTO asset_preference(profile_id,asset_id,liked,reason,source,updated_at) "
-                    f"VALUES('{DEFAULT_PROFILE_ID}',?,1,'','web-batch',strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
-                    "ON CONFLICT(profile_id,asset_id) DO UPDATE SET liked=1,source='web-batch',"
-                    "updated_at=excluded.updated_at",
-                    [(asset_id,) for asset_id in valid_ids],
-                )
-    except BaseException as error:
-        if purge_outcome is not None:
-            _restore_staged_media(purge_outcome["_staged"])
-        handle.finish("failed", error=f"{type(error).__name__}: {error}")
+        with bind(contract.task_runs, handle.run_id):
+            try:
+                with contract.write_transaction() as connection:
+                    found = connection.execute(
+                        f"SELECT id,path,snapshot_path,disposal,disposal_reason,location FROM asset WHERE id IN ({marks})", ids,
+                    ).fetchall()
+                    valid_ids = [row["id"] for row in found]
+                    if not valid_ids:
+                        raise ValueError("assets not found")
+                    _reject_ineligible_targets(operation, found)
+                    now = time.time()
+                    if operation in {"restore", "seen", "dispose"}:
+                        state_receipt = _write_batch_state(connection, found, operation, now, disposal_reason)
+                    elif operation == "delete":
+                        # 已消失的行文件本来就不在了，只删账本行；文件又回到盘上的那几条留着，
+                        # 下一轮扫描会把它们接回在库。选中里有一条已消失的，整批都按这条口径删。
+                        purge_outcome = purge_assets(
+                            connection, found, missing_only=any(row["disposal"] == VANISHED for row in found))
+                    elif operation == "dismiss-junk":
+                        connection.executemany(
+                            "INSERT INTO review_decision(category,item_key,status,note,updated_at) "
+                            "VALUES('junk_file',?,'rejected','用户确认不是垃圾',?) "
+                            "ON CONFLICT(category,item_key) DO UPDATE SET "
+                            "status='rejected',note=excluded.note,updated_at=excluded.updated_at",
+                            [(str(asset_id), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)))
+                             for asset_id in valid_ids],
+                        )
+                    elif operation == "reconsider-junk":
+                        connection.executemany(
+                            "DELETE FROM review_decision WHERE category='junk_file' AND item_key=?",
+                            [(str(asset_id),) for asset_id in valid_ids],
+                        )
+                    elif operation == "region":
+                        # 走 `write_owned_fields` 而不是直接 UPDATE：产地是真相字段，用户这一
+                        # 笔要压得住后面每一轮刮削与推断，归属列是它唯一的凭据。
+                        write_owned_fields(connection, valid_ids,
+                                           {"region": region_value}, USER_MANUAL)
+                    elif operation == "later":
+                        connection.executemany(
+                            "INSERT OR IGNORE INTO watch_queue(profile_id,asset_id,added_at,source) "
+                            f"VALUES('{DEFAULT_PROFILE_ID}',?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'web-batch')",
+                            [(asset_id,) for asset_id in valid_ids],
+                        )
+                    else:
+                        connection.executemany(
+                            "INSERT INTO asset_preference(profile_id,asset_id,liked,reason,source,updated_at) "
+                            f"VALUES('{DEFAULT_PROFILE_ID}',?,1,'','web-batch',strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+                            "ON CONFLICT(profile_id,asset_id) DO UPDATE SET liked=1,source='web-batch',"
+                            "updated_at=excluded.updated_at",
+                            [(asset_id,) for asset_id in valid_ids],
+                        )
+            except BaseException as error:
+                if purge_outcome is not None:
+                    _restore_staged_media(purge_outcome["_staged"])
+                handle.finish("cancelled" if isinstance(error, Cancelled) else "failed",
+                              error="" if isinstance(error, Cancelled) else f"{type(error).__name__}: {error}")
+                raise
+            if purge_outcome is not None:
+                result = {"ok": True, "operation": operation, **_finish_purge(purge_outcome)}
+                result.update(clean_resource_orphans(contract))
+                handle.finish("succeeded", summary={"operation": operation,
+                                                    "changed": len(valid_ids)})
+                return result
+            handle.finish("succeeded", summary={"operation": operation,
+                                                "changed": len(valid_ids)})
+            return {"ok": True, "operation": operation, "changed": len(valid_ids), **state_receipt}
+    except Cancelled:
+        handle.finish('cancelled', summary={'cancelled_by_user': True})
         raise
-    if purge_outcome is not None:
-        result = {"ok": True, "operation": operation, **_finish_purge(purge_outcome)}
-        result.update(clean_resource_orphans(contract))
-        handle.finish("succeeded", summary={"operation": operation,
-                                            "changed": len(valid_ids)})
-        return result
-    handle.finish("succeeded", summary={"operation": operation,
-                                        "changed": len(valid_ids)})
-    return {"ok": True, "operation": operation, "changed": len(valid_ids), **state_receipt}
 
 
 def _add_large_short_copy_cluster(items: list[dict], clusters: list[list[dict]]):

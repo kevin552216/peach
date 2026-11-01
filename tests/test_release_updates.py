@@ -1,11 +1,12 @@
 """发行通道、故障状态和独立托盘检查的隔离回归。"""
 import json
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 import httpx
 
-from peach import release_updates
+from peach import distribution, release_updates
 from peach.http import HttpResponse
 from peach.versioning import VersionManager
 
@@ -16,6 +17,12 @@ def release(version, **extra):
 
 
 class ReleaseUpdateTests(unittest.TestCase):
+    def setUp(self):
+        # 选包跟着本机系统走；这一组用例按 Windows 包写，在 macOS runner 上同样要选 Windows 包。
+        windows = patch.object(release_updates, "sys", SimpleNamespace(platform="win32"))
+        windows.start()
+        self.addCleanup(windows.stop)
+
     def test_r2_release_is_available_when_github_is_unavailable_and_uses_verified_digest(self):
         row = release("1.0.0")
         row["assets"][0].update(size=123, digest="sha256:" + "a" * 64,
@@ -133,3 +140,30 @@ class ReleaseUpdateTests(unittest.TestCase):
         self.assertEqual(result.state, "available")
         self.assertIn("1.0.0", result.message)
         execute.assert_not_called()
+
+    def test_macos_offers_the_dmg_for_its_own_architecture_without_in_app_install(self):
+        row = release("1.0.0")
+        row["assets"] += [
+            {"name": "Peach-1.0.0-macos-arm64.dmg", "state": "uploaded", "size": 456, "digest": "sha256:" + "b" * 64},
+            {"name": "Peach-1.0.0-macos-x86_64.dmg", "state": "uploaded", "size": 789},
+        ]
+        transport = Mock(return_value=HttpResponse(200, {}, json.dumps([row]).encode()))
+        with patch.object(release_updates, "__version__", "0.9.0"):
+            result = release_updates.check(transport=transport, system="darwin", machine="arm64")
+            intel = release_updates.check(transport=transport, system="darwin", machine="x86_64")
+        self.assertEqual(result["state"], "available")
+        self.assertEqual(result["package_kind"], "installer")
+        self.assertEqual(result["asset_url"], release_updates.RELEASES_URL + "/download/v1.0.0/Peach-1.0.0-macos-arm64.dmg")
+        self.assertEqual(result["asset_size"], 456)
+        self.assertTrue(intel["asset_url"].endswith("Peach-1.0.0-macos-x86_64.dmg"))
+        with patch("peach.distribution.standalone", return_value=True):
+            with patch.object(distribution, "sys", SimpleNamespace(platform="darwin")):
+                self.assertFalse(release_updates.snapshot()["in_app_update"], "macOS 独立包没有应用内安装")
+            with patch.object(distribution, "sys", SimpleNamespace(platform="win32")):
+                self.assertTrue(release_updates.snapshot()["in_app_update"])
+
+    def test_macos_skips_releases_without_its_dmg(self):
+        transport = Mock(return_value=HttpResponse(200, {}, json.dumps([release("1.0.0")]).encode()))
+        with patch.object(release_updates, "__version__", "0.9.0"):
+            result = release_updates.check(transport=transport, system="darwin", machine="arm64")
+        self.assertEqual(result["state"], "empty", "只有 Windows 包的版本不能提示 macOS 更新")

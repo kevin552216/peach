@@ -2,6 +2,8 @@
 
 普通分段控件、短菜单悬停面、共用弹窗与选择条动效由 `../components/` 组合实现，参数与差异见 `docs/reference-snapshots/fluid-functionalism.md`；本目录副本不承担这些扩展。
 
+任务资源读数由 `../activity/resource-chip.tsx` 组合：普通读数使用 `Chip`，高占用保留 caption 尺寸并使用对应语义色的实色底。上游没有实色强调档，因此扩展位于副本之外。
+
 来源是 BoardUI 的 shadcn 注册表条目 `https://www.boardui.com/r/<条目>.json`，2026-09-15 取得。
 许可证为 MIT，原文见 `web/vendor/boardui-LICENSE.txt`。
 

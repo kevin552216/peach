@@ -174,12 +174,16 @@ describe('实体页筛选浮层', () => {
       const pressed = await page.evaluate(() => ({
         state: document.querySelector('[data-entity-state="fresh"]')?.getAttribute('aria-pressed'),
         busy: document.querySelector('[data-entity-filter-glass] [data-filter-row="bottom"]')?.getAttribute('aria-busy'),
-        shimmer: !!document.querySelector('[data-entity-readout] [data-skeleton="count"]'),
+        shimmer: !!document.querySelector('[data-entity-readout] [data-async-text][aria-busy="true"] > [data-async-text-skeleton]'),
+        retained: document.querySelector('[data-entity-readout] [data-async-text-value]')?.getAttribute('aria-hidden'),
       }));
-      assert.deepEqual(pressed, { state: 'true', busy: 'true', shimmer: true }, '按下态要等请求回来才到位');
+      assert.deepEqual(pressed, { state: 'true', busy: 'true', shimmer: true, retained: 'true' }, '按下态和读数等待态当场到位');
+      await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-entity-readout] [data-async-text-skeleton]')!).opacity === '1');
       assertCovers(await glideOver(page, '[data-view-glide=""]', '[data-entity-state="fresh"]'), '换过去的观看状态');
       stubs.release();
       await page.locator('[data-entity-readout]', { hasText: '视频 · 24' }).waitFor({ timeout: 15_000 });
+      await page.waitForFunction(() => !document.querySelector('[data-entity-readout] [data-async-text][aria-busy="true"]')
+        && getComputedStyle(document.querySelector('[data-entity-readout] [data-async-text-skeleton]')!).opacity === '0');
       assert.match(page.url(), /[?&]state=fresh/);
       assert.match(stubs.itemQueries.at(-1)!, /state=fresh/);
       assert.deepEqual(unexpected(opened), []);

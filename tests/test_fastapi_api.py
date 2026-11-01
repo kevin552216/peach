@@ -2322,6 +2322,34 @@ class FastApiContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('<script>', payload)
                 self.assertEqual(response.headers['cache-control'], 'no-store')
 
+    async def test_tutorial_entry_first_frame_uses_shared_ledger_completion(self):
+        from html.parser import HTMLParser
+        from peach.web_tutorial import CAMPAIGN
+
+        class Buttons(HTMLParser):
+            entry = None
+
+            def handle_starttag(self, tag, attrs):
+                attributes = dict(attrs)
+                if tag == 'button' and attributes.get('id') == 'tutorialBtn':
+                    self.entry = attributes
+
+        self.page.write_text('<html><head></head><body><button id="tutorialBtn">教程</button></body></html>',
+                             encoding='utf-8')
+        await self.client.post('/login', content='token=secret&next=%2F',
+                               headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        for action, hidden in ((None, False), ('complete', True), ('reopen', False)):
+            if action:
+                result = await self.client.post('/api/tutorial-progress', json={'campaign': CAMPAIGN, 'action': action})
+                self.assertEqual(result.status_code, 200, result.text)
+            for path in ('/', '/settings/library'):
+                response = await self.client.get(path)
+                self.assertEqual(response.status_code, 200, response.text)
+                parsed = Buttons()
+                parsed.feed(response.text)
+                self.assertIsNotNone(parsed.entry)
+                self.assertEqual('hidden' in parsed.entry, hidden)
+
     async def test_canonical_page_urls_require_authentication(self):
         for path in ('/assets/1', '/posts/1', '/works/ABC-001', '/performers/1',
                      '/tags/1', '/tasks', '/sources', '/subscriptions', '/settings/library',
@@ -3845,6 +3873,10 @@ class UnconfiguredMachineTests(unittest.IsolatedAsyncioTestCase):
                         ready = await client.get("/healthz?ready=1")
                         self.assertEqual(ready.status_code, 503)
                         self.assertFalse(ready.json()["ready"])
+                        for path in ('/', '/settings/library'):
+                            page = await client.get(path)
+                            self.assertEqual(page.status_code, 200)
+                            self.assertIn('id="tutorialBtn"', page.text)
                 self.assertEqual([record.levelname for record in captured.records], ["WARNING"])
                 self.assertIn("数据库准备完成后重启服务", captured.output[0])
                 self.assertNotIn(str(database), captured.output[0])

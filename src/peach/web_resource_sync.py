@@ -21,6 +21,8 @@ import re
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from .task_control import controlled
 from pathlib import Path, PureWindowsPath
 from typing import Callable, Protocol, Sequence
 
@@ -81,15 +83,19 @@ def configured_resource_locations() -> tuple[str, ...]:
                  if location in SCANNABLE_LOCATIONS and roots)
 
 
+@controlled
 def _scan_resource_directory(
     item: tuple[Path, dict[str, list[int]]],
 ) -> tuple[list[int], int]:
+    from .task_control import checkpoint
+    checkpoint()
     parent, expected = item
     present: set[str] = set()
     unreadable = 0
     try:
         with os.scandir(parent) as entries:
             for entry in entries:
+                checkpoint()
                 key = entry.name.casefold()
                 if key not in expected:
                     continue
@@ -143,7 +149,9 @@ def _missing_resource_ids(
             max_workers=min(RESOURCE_SCAN_WORKERS, len(directory_items)),
             thread_name_prefix="PeachResourceScan",
         ) as executor:
-            results = list(executor.map(_scan_resource_directory, directory_items))
+            futures = [executor.submit(copy_context().run, _scan_resource_directory, item)
+                       for item in directory_items]
+            results = [future.result() for future in futures]
     missing = [asset_id for ids, _unreadable in results for asset_id in ids]
     unreadable = sum(count for _ids, count in results)
     if unreadable_dirs is not None:
@@ -193,7 +201,10 @@ def _confirm_vanished(rows: Sequence) -> list:
     if not rows:
         return []
 
+    @controlled
     def present(row) -> bool:
+        from .task_control import checkpoint
+        checkpoint()
         try:
             return translate_ledger_path(row["path"]).exists()
         except OSError:
@@ -204,7 +215,8 @@ def _confirm_vanished(rows: Sequence) -> list:
         max_workers=min(RESOURCE_SCAN_WORKERS, len(rows)),
         thread_name_prefix="PeachVanishedCheck",
     ) as executor:
-        verdicts = list(executor.map(present, rows))
+        futures = [executor.submit(copy_context().run, present, row) for row in rows]
+        verdicts = [future.result() for future in futures]
     return [row for row, here in zip(rows, verdicts) if not here]
 
 

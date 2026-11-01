@@ -140,7 +140,8 @@ def _metadata_response(contract, args, candidates, picked, limit, scope):
 
 
 def _metadata_message(job):
-    messages = {"running": "正在读取作品资料", "complete": "作品资料读取完成", "failed": "作品资料未取得"}
+    messages = {"running": "正在读取作品资料", "complete": "作品资料读取完成", "failed": "作品资料未取得",
+                'cancelling': '正在取消作品资料读取', 'cancelled': '已取消作品资料读取'}
     reasons = {"request_budget": "本轮请求预算已用完", "byte_budget": "本轮流量预算已用完",
                "time_budget": "本轮时间预算已用完", "source_cooldown": "来源暂时不可用，已停止读取",
                "cancelled": "已停止读取作品资料"}

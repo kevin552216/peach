@@ -14,6 +14,7 @@ import re
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -765,5 +766,7 @@ def _tag_types(connector, names: list[str]) -> dict[str, str]:
     if pending:
         with ThreadPoolExecutor(max_workers=min(TAG_TYPE_WORKERS,
                                                 len(pending))) as pool:
-            list(pool.map(ask, pending))
+            futures = [pool.submit(copy_context().run, ask, name) for name in pending]
+            for future in futures:
+                future.result()
     return {name: _TAG_TYPES[name] for name in names if name in _TAG_TYPES}

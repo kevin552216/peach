@@ -1,12 +1,74 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Browser } from 'playwright-core';
-import { installDesignBrowser, PIXEL } from './design-fixture.ts';
+import { installDesignBrowser, PIXEL, tokenColor } from './design-fixture.ts';
 import { requiredEnv, settle, visit, VIEWPORTS } from './harness.ts';
 
 describe('任务页云下载布局', () => {
   let browser: Browser;
   installDesignBrowser((next) => { browser = next; });
+  for (const viewport of VIEWPORTS) it(`${viewport.name} 资源分色并在高占用时加深，已取消使用红色标签`, async () => {
+    const reading = (high: boolean) => ({
+      cpu: { state: 'ready', percent: high ? 75 : 5, high },
+      gpu: { state: 'ready', percent: high ? 80 : 4, high },
+      network: { state: 'ready', bytes_per_second: high ? 15 * 1024 * 1024 : 1024, high },
+      sampled_at: '2026-10-31T08:00:00Z',
+    });
+    const row = (id: number, status: string) => ({
+      id, task_key: `resource-${id}`, task_label: `资源采样任务 ${id}`, trigger: 'manual', status,
+      host: 'desk', started_at: '2026-10-31T08:00:00Z',
+      finished_at: status === 'running' ? null : '2026-10-31T08:01:00Z',
+      elapsed_seconds: 60, progress_current: 1, progress_total: 10, progress_label: '正在处理',
+      result_summary: {}, error: '', parent_run_id: null as number | null, followup_key: '',
+    });
+    const opened = await visit(browser, '/tasks', viewport, async page => {
+      await page.route('**/api/downloads?*', route => route.fulfill({ json: { available: false, tasks: [], providers: [] } }));
+      await page.route('**/api/tasks*', route => route.fulfill({ json: {
+        available: true, running: [
+          { ...row(1, 'running'), resources: reading(true), control: { state: 'running', actions: ['pause', 'cancel'] } },
+          { ...row(90, 'running'), parent_run_id: 1, followup_key: 'child:90', resources: reading(false),
+            control: { state: 'running', actions: ['pause', 'cancel'] } },
+        ], skipped: [], finished: [row(3, 'cancelled'), row(4, 'succeeded'), row(5, 'succeeded')],
+        followup_counts: { 4: { cancelled: 2 }, 5: { succeeded: 1, cancelled: 1 } },
+      } }));
+    });
+    try {
+      const page = opened.page;
+      await page.locator('[data-task-resources="1"]').waitFor();
+      const pairs = [['cpu', 'blue'], ['gpu', 'purple'], ['network', 'cyan']] as const;
+      const backgrounds: string[] = [];
+      for (const [metric, color] of pairs) {
+        const high = page.locator(`[data-task-resources="1"] [data-task-resource="${metric}"]`);
+        const normal = page.locator(`[data-task-resources="90"] [data-task-resource="${metric}"]`);
+        const normalBackground = await normal.evaluate(node => getComputedStyle(node).backgroundColor);
+        const highBackground = await high.evaluate(node => getComputedStyle(node).backgroundColor);
+        assert.equal(normalBackground, await tokenColor(page, 'body', `--color-status-${color}-background`));
+        assert.equal(highBackground, await tokenColor(page, 'body', `--color-status-${color}-text`));
+        assert.notEqual(highBackground, normalBackground);
+        backgrounds.push(highBackground);
+      }
+      assert.equal(new Set(backgrounds).size, 3);
+      const red = await tokenColor(page, 'body', '--color-status-rose-background');
+      for (const [id, label] of [[3, '已取消'], [4, '后续任务已取消'], [5, '部分后续任务已取消']] as const) {
+        const badge = page.locator(`#run-${id}`).getByText(label, { exact: true });
+        const color = await badge.evaluate(node => {
+          const chip = node.parentElement?.tagName === 'SPAN' ? node.parentElement : node;
+          return getComputedStyle(chip).backgroundColor;
+        });
+        assert.equal(color, red);
+      }
+      const geometry = await page.locator('#run-1').evaluate(card => {
+        const controls = card.querySelector('[data-task-controls="1"]')!.getBoundingClientRect();
+        const title = card.querySelector('strong')!.getBoundingClientRect();
+        return { fits: document.documentElement.scrollWidth <= innerWidth,
+          rightOfTitle: controls.left >= title.right, insideCard: controls.right <= card.getBoundingClientRect().right };
+      });
+      assert.equal(geometry.fits, true);
+      assert.equal(geometry.rightOfTitle, true);
+      assert.equal(geometry.insideCard, true);
+      assert.deepEqual(opened.problems, []);
+    } finally { await opened.close() }
+  });
   for (const viewport of VIEWPORTS) it(`${viewport.name} 追更问题展示来源原因和管理入口`, async () => {
     const opened = await visit(browser, '/tasks', viewport, async page => {
       await page.route('**/api/tasks*', route => route.fulfill({ json: {

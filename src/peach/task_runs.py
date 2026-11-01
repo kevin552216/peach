@@ -93,6 +93,9 @@ TASK_LABELS = {
     "resource-apply": "资源同步清理",
     "scraping-cover": "封面采集",
     "media-repair": "媒体修复",
+    "mp4-header-repair": "播放文件头修复",
+    'jav-discovery-metadata': '发现页资料读取',
+    'diagnostic-export': '诊断导出',
     "upgrade-repairs": "自动修复",
     "upgrade-library": "自动修复资料",
     "organize": "按模板整理",
@@ -546,13 +549,24 @@ class TaskRunStore:
             return None
         ahead = tuple(dict.fromkeys(str(key) for key in first or ())) or ("",)
         marks = ",".join("?" * len(keys))
+        from .task_control import requested
         moment = stamp()
         with self.database.write_transaction(notify=False) as connection:
-            row = connection.execute(
-                f"SELECT id FROM task_run WHERE followup_key IS NOT NULL "
+            rows = connection.execute(
+                f"SELECT id,parent_run_id,root_run_id FROM task_run WHERE followup_key IS NOT NULL "
                 f"AND status='pending' AND task_key IN ({marks}) "
-                f"ORDER BY task_key IN ({','.join('?' * len(ahead))}) DESC, id LIMIT 1",
-                (*keys, *ahead)).fetchone()
+                f"ORDER BY task_key IN ({','.join('?' * len(ahead))}) DESC, id",
+                (*keys, *ahead)).fetchall()
+            row = None
+            for candidate in rows:
+                action = requested(self.database.db_path, candidate['id'],
+                                   (candidate['parent_run_id'], candidate['root_run_id']))
+                if action == 'cancel':
+                    connection.execute("UPDATE task_run SET status='cancelled',finished_at=?,heartbeat_at=? "
+                                       "WHERE id=? AND status='pending'", (moment, moment, candidate['id']))
+                elif action != 'pause':
+                    row = candidate
+                    break
             if row is None:
                 return None
             run_id = int(row["id"])
@@ -813,9 +827,14 @@ class TaskRunStore:
                          conflict=conflict, total=total, label=label)
         handle = TaskRunHandle(self, run.id if run else None)
         try:
-            yield handle
+            from .task_control import bind, checkpoint
+            with bind(self, handle.run_id):
+                yield handle
+                checkpoint()
         except BaseException as error:
-            handle.finish("failed", error=f"{type(error).__name__}: {error}")
+            from .task_control import Cancelled
+            handle.finish('cancelled' if isinstance(error, Cancelled) else 'failed',
+                          error='' if isinstance(error, Cancelled) else f"{type(error).__name__}: {error}")
             raise
         else:
             handle.finish("succeeded")
@@ -885,6 +904,8 @@ class TaskRunHandle:
 
     def checkpoint(self, **fields) -> None:
         """领域结果提交后保存完成集合；后继重新领取时沿用。"""
+        from .task_control import checkpoint
+        checkpoint()
         if self.run_id is None or not self.store.enabled:
             return
         with self.store.database.write_transaction(notify=False) as connection:
@@ -899,10 +920,14 @@ class TaskRunHandle:
     def progress(self, current: int | None = None, total: int | None = None,
                  label: str | None = None, *,
                  throttle: float = PROGRESS_INTERVAL) -> None:
+        from .task_control import checkpoint
+        checkpoint()
         self.store.progress(self.run_id, current=current, total=total,
                             label=label, throttle=throttle)
 
     def heartbeat(self) -> None:
+        from .task_control import checkpoint
+        checkpoint()
         self.store.heartbeat(self.run_id)
 
     def finish(self, status: str, *, summary: dict | None = None,

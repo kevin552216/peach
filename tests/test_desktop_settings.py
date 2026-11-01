@@ -59,6 +59,14 @@ class DesktopSettingsTests(unittest.TestCase):
                          'config.toml.bak 是用户按运维文档自己复制的回退副本')
         self.assertNotIn(str(unrelated), full['files'])
 
+    def test_macos_standalone_uninstall_follows_the_trash_convention(self):
+        with patch.object(desktop_uninstall, 'sys', SimpleNamespace(platform='darwin')),                 patch.object(desktop_uninstall.distribution, 'standalone', return_value=True):
+            state = desktop_uninstall.snapshot(self.config)
+        self.assertFalse(state['available'], 'macOS 不跑 Windows 的卸载助手')
+        self.assertIn('移到废纸篓', state['message'])
+        self.assertIn('关闭开机自启', state['message'], 'LaunchAgent 不随应用一起删除')
+        self.assertEqual(state['data_root'], str(self.data))
+
     def test_uninstall_refuses_media_overlap_external_storage_and_source_tree(self):
         self.config.locations = {'local': (str(self.data / 'sources/media'),)}
         with self.assertRaisesRegex(ValueError, '媒体'):

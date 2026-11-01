@@ -30,6 +30,7 @@ import type { EntityHeroActions, EntityHeroHelpers } from '../entity-hero/entity
 import { EntityHeroPage } from '../entity-hero/entity-hero-page';
 import { feedNewKey, feedNewOptions, postFeedAction } from '../feed-new/feed-new';
 import { queryClient } from '../query';
+import { pageNavigationReady, rememberPageState } from '../../history/page-navigation';
 import {
   EMPTY_MEDIA, codeSetsOf, entityKey, entityOptions, entityPhotosKey, fetchItems, itemsOptions,
   photosOptions, tagList, tagPressed, type EntityPageData, type EntityPageProps, type PhotoPage,
@@ -174,6 +175,13 @@ function EntityLoaded(props: EntityPageProps & { entity: EntityPageData }) {
   const hasItems = !!items.data;
   useEffect(() => { actions.painted(view, photoWall) },
     [actions, view, photoWall, itemsRevision, photos?.revision, hasItems, online.key]);
+  useEffect(() => {
+    if (!hosts.body.isConnected || document.getElementById('index')?.hidden) return;
+    rememberPageState('entity', { seed: props.seed, revision: props.revision, jav: props.jav });
+    if (!items.isPending && !wall.isPending) {
+      void pageNavigationReady(() => hosts.body.isConnected && !document.getElementById('index')?.hidden, hosts.filter);
+    }
+  }, [hosts, props.seed, props.revision, props.jav, items.isPending, wall.isPending, filterKey, view]);
 
   /* ── 写操作 ── */
   const alive = useRef(true);
@@ -396,7 +404,7 @@ function EntityLoaded(props: EntityPageProps & { entity: EntityPageData }) {
         hosts.filter)}
       {createPortal(
         <EntityFolderWorkspace enabled={view === 'videos'}>{view === 'online'
-          ? <EntityOnline key={online.key} view={online.view} media={online.media} result={online.result}
+          ? <EntityOnline view={online.view} media={online.media} result={online.result}
             data={online.data} visible={online.visible} context={online.context} photoSize={props.photoSize}
             photoLayout={props.photoLayout} imagesOnly={props.followImagesOnly} helpers={props.follow.helpers}
             actions={props.follow.actions} canLoadMore={props.canLoadMore} clearFilters={online.clearFilters} />
@@ -408,6 +416,7 @@ function EntityLoaded(props: EntityPageProps & { entity: EntityPageData }) {
             <EntityBodyPage kind={kind} name={name} view={view} roster={rosterProps} items={items.data ?? null}
               revision={itemsRevision} fetchPage={fetchPage}
               listScope={JSON.stringify([kind, name, filters, props.jav, filters.sort === 'seed' ? props.seed : ''])}
+              restoreNavigation={props.restoreNavigation}
               photos={photos} photoSize={props.photoSize}
               photoLayout={props.photoLayout} helpers={props.card.helpers} actions={bodyActions} layout={layout}
               selectMode={props.selectMode} selected={props.selected} seekSeconds={props.seekSeconds}

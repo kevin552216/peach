@@ -58,12 +58,15 @@ def context_fields(width: int, height: int, duration: float) -> tuple[str | None
 
 
 def probe_file(ffprobe: str, path: str, timeout: float = TIMEOUT_SECONDS) -> tuple:
+    from .task_control import run as run_task_process
+    from .task_resources import media_input
+    media_input(path)
     from .processing_traffic import CURRENT as TRAFFIC, media_statistics
     if skip_background_read(path):
         raise ValueError('STRM 和 ISO 不执行视频探测')
     from .smb_media import input_url
     path = input_url(path)
-    result = subprocess.run(
+    result = run_task_process(
         [
             ffprobe, "-v", "verbose" if TRAFFIC.get() is not None else "error", "-rw_timeout", "8000000",
             "-select_streams", "v:0", "-show_entries",

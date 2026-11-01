@@ -25,7 +25,7 @@ import { busyProps } from './use-action';
 const THUMBNAIL_OPTIONS = [['off', '关闭'], ['precise', '每 10 秒一张'], ['coarse', '每 30 秒一张']] as const;
 
 export function VideoThumbnailRow({ epoch = 0 }: { epoch?: number }) {
-  return <Section title="时间轴缩略图"><VideoThumbnailControls epoch={epoch} /></Section>;
+  return <Section guide="timeline" title="时间轴缩略图"><VideoThumbnailControls epoch={epoch} /></Section>;
 }
 
 export function VideoThumbnailControls({ epoch = 0, disabled = false }: { epoch?: number; disabled?: boolean }) {
@@ -67,7 +67,7 @@ export function FollowPreferenceRows({ receipt }: { receipt(message: string): vo
   const initialDays = settings.data?.followInitialDays ?? store.value.followInitialDays;
   const error = initial.error || settings.error;
   return (
-    <Section title="关注采集">
+    <Section guide="follow-options" title="关注采集">
       <Rows>
         <FollowScheduleRow />
         <FeedScheduleRow />

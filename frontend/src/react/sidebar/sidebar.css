@@ -20,11 +20,6 @@
 
 /* ── 基础几何 ── */
 [data-sidebar-chip][data-online]{border-color:color-mix(in srgb,#5AC8D8 42%,transparent);background:color-mix(in srgb,#5AC8D8 10%,transparent)}
-/* 拖动排序：被拖的那一项变淡，落点在上沿或下沿画一条线。 */
-[data-sidebar-nav] button[data-dragging]{opacity:.38}
-[data-sidebar-nav] button[data-drop=before]::before,[data-sidebar-nav] button[data-drop=after]::after{content:'';position:absolute;z-index:2;left:7px;right:7px;height:2px;border-radius:var(--pill-radius);background:var(--ink)}
-[data-sidebar-nav] button[data-drop=before]::before{top:-3px}
-[data-sidebar-nav] button[data-drop=after]::after{bottom:-3px}
 [data-sidebar-nav] button[data-nav]{position:relative}
 /* 页面正文给侧栏让出 `--railW`；`--railW` 本身由遗留层的 `:root` 给。 */
 html>body{padding-left:var(--railW)}
@@ -39,7 +34,7 @@ html>body{padding-left:var(--railW)}
 [data-sidebar-nav] svg{width:24px;height:24px;margin:0 15px 0 24px}
 /* 标题行：品牌键在左、开合键在右。 */
 [data-sidebar-head]{display:flex;align-items:center;justify-content:space-between}
-[data-sidebar-nav]{display:flex;flex-direction:column;gap:3px;margin-bottom:18px}
+[data-sidebar-nav]{--sidebar-reorder-ms:250;position:relative;display:flex;flex-direction:column;gap:3px;margin-bottom:18px}
 [data-sidebar-nav] button{padding-left:12px}
 [data-sidebar-nav] button{display:flex;align-items:center;gap:14px;padding:11px 14px;background:none;border:0;border-radius:var(--control-radius);cursor:pointer;text-align:left;font-size:var(--fs-lg);color:var(--muted)}
 [data-sidebar-nav] button:hover{background:var(--hover)}
@@ -197,7 +192,7 @@ body[class~=drawer-open]{--railW:296px}
 [data-sidebar-head] [class~=mark] svg{width:20px;height:20px;stroke-width:2}
 /* 导航条目是「图标＋名字」，字形随名字的字号缩放；收起成图标列时名字只是收窄到 0，字号不变，图标也不跳。 */
 [data-sidebar-drawer] [data-sidebar-nav] button svg{width:var(--icon-inline);height:var(--icon-inline);stroke-width:2}
-[data-sidebar-home-logo]{width:24px;height:24px;object-fit:contain;flex:none}
+[data-sidebar-home-logo]{width:var(--icon-inline);height:var(--icon-inline);object-fit:contain;flex:none}
 [data-sidebar-drawer]:not([class~=open]) [data-sidebar-nav] button:has([data-sidebar-home-logo]){padding:6px}
 [data-sidebar-drawer][data-sidebar-drawer] [data-sidebar-nav] button[aria-pressed=true]:hover,[data-sidebar-drawer][data-sidebar-drawer] [data-sidebar-nav] button[aria-pressed=true]:active{background:var(--board-blue);color:white;filter:brightness(1.08)}
 [data-sidebar-toggle]>span{font-size:12px;line-height:20px;font-weight:500;color:var(--muted)}
@@ -220,7 +215,6 @@ body[class~=drawer-open]{--railW:296px}
 }
 [data-sidebar-drawer] [data-sidebar-nav] button{font:var(--board-body)}
 [data-sidebar-head] #brandHome [class~=mark]{color:var(--glass-text)}
-[data-sidebar-home-logo]{width:20px;height:20px}
 [data-sidebar-drawer]:not([class~=open]) [data-sidebar-nav] button:has([data-sidebar-home-logo]){padding:8px}
 [data-sidebar-drawer][data-sidebar-drawer] [data-sidebar-nav] button:not([aria-pressed=true]),[data-sidebar-head] #brandHome [class~=mark]{color:var(--color-text-secondary)}
 [data-sidebar-head] #brandHome:hover{background:var(--color-background-primary-hover);border-radius:var(--pill-radius)}
@@ -266,4 +260,20 @@ body :is([data-sidebar-range] input)::-moz-range-thumb{width:18px;height:18px;bo
   [data-sidebar-drawer]:not([class~=open]) [data-sidebar-head] #filterBtn{width:36px;height:20px}
   [data-sidebar-drawer]:not([class~=open]) #brandHome{width:32px;height:32px;min-height:32px;padding:0;max-width:none}
   [data-sidebar-drawer]:not([class~=open]) #brandHome [class~=mark]{width:32px;height:32px}
+}
+
+/* 原帖的插入波纹：近邻先让开，位移和延迟由导航按落点距离计算。 */
+[data-sidebar-nav] button{touch-action:none;user-select:none;translate:0 var(--sidebar-nudge,0px);transition:translate calc(var(--sidebar-reorder-ms)*1ms) var(--spring-press) var(--sidebar-delay,0ms),scale calc(var(--spring-press-ms)*1ms) var(--spring-press)}
+[data-sidebar-nav][data-reordering] button{cursor:grabbing}
+[data-sidebar-nav] button[data-dragging]{position:absolute;top:var(--sidebar-picked-top);left:0;width:100%;z-index:3;scale:.9;transform:translate3d(var(--sidebar-drag-x,18px),var(--sidebar-drag-y,0px),0);background:var(--ground)!important;box-shadow:var(--glass-pick-shadow);cursor:grabbing;will-change:transform}
+[data-sidebar-drawer]:has([data-sidebar-nav][data-reordering])>[data-sidebar-glide]{opacity:0}
+[data-sidebar-drop-line]{position:absolute;top:0;transform:translateY(var(--sidebar-line-top));left:10px;right:10px;height:2px;z-index:2;pointer-events:none;transition:transform calc(var(--sidebar-reorder-ms)*1ms) var(--spring-press)}
+[data-sidebar-drop-line]>span{display:block;height:100%;border-radius:var(--pill-radius);background:color-mix(in srgb,var(--ink) 15%,transparent);transform:scaleX(1);transform-origin:center;transition:transform var(--motion-swap)}
+@starting-style{[data-sidebar-drop-line]>span{transform:scaleX(0)}}
+[data-sidebar-order-status]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@media(prefers-reduced-motion:reduce){
+  [data-sidebar-nav] button{translate:none;transition:none}
+  [data-sidebar-nav][data-reordering] button[data-dragging]{position:static;width:auto;scale:1;transform:none;background:none!important;box-shadow:none}
+  [data-sidebar-drop-line],[data-sidebar-drop-line]>span{transition:none}
+  @starting-style{[data-sidebar-drop-line]>span{transform:none}}
 }

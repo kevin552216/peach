@@ -167,7 +167,7 @@ export function Credentials(
           </div>
         </section>
       ))}</>;
-  return embedded ? <Section title="来源凭据" aside={pendingLabel || undefined}>
+  return embedded ? <Section guide="credentials" title="来源凭据" aside={pendingLabel || undefined}>
     <Stack><div className="flex flex-col gap-4">{groups}</div></Stack>
   </Section> :
     <div className={cardClass({ padding: 'none', className: 'flex flex-col gap-4 px-6 py-5 max-sm:px-4' })}>

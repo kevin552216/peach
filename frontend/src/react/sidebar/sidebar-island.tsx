@@ -23,7 +23,7 @@
  * `sidebar.css`，不用工具类。 */
 import {
   createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
-  type DragEvent, type MouseEvent, type ReactNode,
+  type CSSProperties, type MouseEvent, type ReactNode,
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 
@@ -34,7 +34,8 @@ import { Icon } from '../settings-panel/icon';
 import type {
   SidebarApi, SidebarChip, SidebarContent, SidebarDot, SidebarFacets, SidebarHost, SidebarProps,
 } from './sidebar-api';
-import { moveSidebarKey, useCommitSidebarOrder } from './sidebar-order';
+import { useCommitSidebarOrder } from './sidebar-order';
+import { useSidebarReorder } from './use-sidebar-reorder';
 
 /* 首页那一项的键是空串；空串写进 dataTransfer 等于没写，给它一个占位。 */
 const HOME = '__home__';
@@ -120,48 +121,32 @@ function Navigation({ host: at, epoch, version }: { host: SidebarHost; epoch: nu
     return () => { resize.disconnect(); cancelAnimationFrame(frame); document.removeEventListener('board:sidebar', later) };
   }, [at, sync]);
 
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{ key: string; after: boolean } | null>(null);
-  const clearDrag = () => { setDragging(null); setDrop(null) };
-  const drag = (key: string) => ({
-    draggable: true,
-    onDragStart: (event: DragEvent<HTMLButtonElement>) => {
-      setDragging(key);
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', key || HOME);
-    },
-    onDragOver: (event: DragEvent<HTMLButtonElement>) => {
-      if (dragging === null || dragging === key) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      const after = event.clientY > event.currentTarget.getBoundingClientRect().top + event.currentTarget.offsetHeight / 2;
-      if (drop?.key !== key || drop.after !== after) setDrop({ key, after });
-    },
-    onDrop: (event: DragEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      const from = dragging, after = drop?.key === key ? drop.after : false;
-      clearDrag();
-      const next = from === null ? null : moveSidebarKey(order, from, key, after);
-      if (next) commit(next);
-    },
-    onDragEnd: clearDrag,
-  });
+  const reorder = useSidebarReorder(column, order, commit, () => requestAnimationFrame(sync));
 
   const drawer = at.scroll.parentElement;
   return (
     <>
-      <div data-sidebar-nav="" ref={column} onPointerLeave={glide.leave}>
-        {items.map(([key, label, glyph], index) => (
+      <div data-sidebar-nav="" ref={column} onPointerLeave={glide.leave}
+        data-reordering={reorder.picked ? '' : undefined} onClickCapture={reorder.clickCapture}>
+        {items.map(([key, label, glyph], index) => {
+          const nudge = reorder.nudge(key);
+          return (
           <button type="button" key={key || HOME} data-nav={key} aria-pressed={pressed[index]} aria-label={label}
-            data-dragging={dragging === key ? '' : undefined}
-            data-drop={drop?.key === key ? (drop.after ? 'after' : 'before') : undefined}
-            onClick={() => at.navTo(key)} onPointerEnter={glide.hover} {...drag(key)}>
+            data-dragging={reorder.picked?.key === key ? '' : undefined}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            style={{ '--sidebar-picked-top': reorder.picked?.key === key ? `${reorder.picked.top}px` : undefined,
+              '--sidebar-nudge': `${nudge.distance}px`, '--sidebar-delay': `${nudge.delay}ms` } as CSSProperties}
+            onClick={() => at.navTo(key)} onDoubleClick={() => at.navToTop()} onPointerEnter={glide.hover}
+            {...reorder.bindings(key)}>
             {key === '' ? <img data-sidebar-home-logo="" src="/peach-logo-64.png"
               srcSet="/peach-logo-64.png 64w, /peach-logo-128.png 128w" sizes="24px" width={24} height={24} alt=""
-              decoding="async" /> : <Icon name={glyph} />}
+              decoding="async" draggable={false} /> : <Icon name={glyph} />}
             <span>{label}</span>
           </button>
-        ))}
+        )})}
+        {reorder.hint ? <span data-sidebar-drop-line="" aria-hidden="true"
+          style={{ '--sidebar-line-top': `${reorder.lineTop}px` } as CSSProperties}><span /></span> : null}
+        <span role="status" aria-live="polite" data-sidebar-order-status="">{reorder.announcement}</span>
       </div>
       {drawer ? createPortal(<span data-sidebar-glide="" aria-hidden="true" ref={pane} />, drawer) : null}
     </>

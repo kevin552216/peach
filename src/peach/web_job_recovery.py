@@ -16,6 +16,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 
 def restore(contract):
+    from .jav_discovery_metadata import discovery_metadata
+    from .job_recovery import read
     return resume(contract.db_path, {
         "library-processing": lambda body: w_library_processing(contract, body, resume=True),
         "timeline-thumbnails": lambda body: w_thumbnail_jobs(contract, body),
@@ -31,6 +33,9 @@ def restore(contract):
         "taste-refresh": lambda body: w_taste_refresh(contract, body),
         "media-repair": lambda body: w_media_repair(contract, body),
         "amane-bridge": lambda body: w_scraping_amane_rebuild(contract, body),
+        'jav-discovery-metadata': lambda body: discovery_metadata(contract).ensure(
+            body['codes'], refresh=body.get('refresh', False),
+            _resume=read(contract.db_path, 'jav-discovery-metadata').get('checkpoint')),
         "organize": lambda body: (w_organize_rollback(contract, body) if body.get('action') == 'rollback'
                                     else w_organize_apply(contract, body)),
     })

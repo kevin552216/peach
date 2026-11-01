@@ -43,6 +43,8 @@ from peach import platform as peach_platform
 from peach.config import FFMPEG_DIR
 from peach.ffmpeg import FFmpegResolver
 from peach.library_processing import process_library
+from peach.web_contract import WebContract
+from peach.web_tutorial import CAMPAIGN, w_tutorial_progress
 from support.conditions import missing_prerequisite, windows_ledger_roots
 from support.browser import chrome_executable
 from support.ledger import fresh_ledger
@@ -256,6 +258,8 @@ class WebE2ESmokeTests(unittest.TestCase):
                                  provider_factory=refuse_network)
         if result["status"] != "complete":
             raise AssertionError(f"演示库 process 没有完成：{result}")
+        # 普通页面用已看过邀请的账本；首次邀请由教程专用用例独立验证。
+        w_tutorial_progress(WebContract(cls.db), {'campaign': CAMPAIGN, 'action': 'dismiss'})
         with closing(sqlite3.connect(cls.db)) as connection:
             row = connection.execute(
                 "SELECT id FROM asset WHERE medium='video' ORDER BY id LIMIT 1").fetchone()

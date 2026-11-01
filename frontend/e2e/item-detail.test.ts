@@ -360,12 +360,15 @@ describe('作品详情岛', () => {
     try {
       const page = opened.page;
       let listed = 0;
-      // 桩里的列表行没有续播位置，卡片不给打开键；这里补上停在第一条。
+      // 列表摘要反映成功写入的续播点，关闭后卡片与再次打开都应使用它。
       await page.route((url) => url.pathname === '/api/playlists', (route) => {
         listed += 1;
+        const progress = opened.stub.writes.findLast(write => write.url === '/api/playlist'
+          && write.body.action === 'progress' && write.body.id === PLAYLIST.id);
+        const current = Number(progress?.body.asset_id || PLAYLIST.items[0]);
         return route.fulfill({ json: { items: [{
           id: PLAYLIST.id, name: PLAYLIST.name, item_count: PLAYLIST.items.length,
-          current_asset_id: PLAYLIST.items[0], preview_asset_id: PLAYLIST.items[0],
+          current_asset_id: current, preview_asset_id: current,
         }] } });
       });
       await page.goto(new URL('/playlists', page.url()).toString(), { waitUntil: 'load' });
@@ -375,14 +378,14 @@ describe('作品详情岛', () => {
         await pathIs(page, `/assets/${id}?playlist=${PLAYLIST.id}`);
         await page.locator(`#stage [data-queue-item="${id}"][aria-current="true"]`).waitFor();
       };
-      const enter = async () => {
+      const enter = async (resume: number) => {
         await card.locator('[data-mix-open]').click();
-        await pathIs(page, `/assets/${PLAYLIST.items[0]}?playlist=${PLAYLIST.id}`);
+        await pathIs(page, `/assets/${resume}?playlist=${PLAYLIST.id}`);
         await page.locator(DETAIL_READY).waitFor();
         await step(PLAYLIST.items[1]!);
         await step(PLAYLIST.items[2]!);
       };
-      const closeToList = async () => {
+      const closeToList = async (resume: number) => {
         const before = listed;
         await page.locator('#closeStage').click();
         await pathIs(page, '/playlists');
@@ -391,16 +394,17 @@ describe('作品详情岛', () => {
         assert.equal(await page.locator('#stage[open]').count(), 0);
         for (const deadline = Date.now() + 10_000; listed <= before && Date.now() < deadline;) await page.waitForTimeout(50);
         assert.ok(listed > before, '关掉之后列表页没有重读');
+        await card.locator(`img[src*="id=${resume}&"]`).first().waitFor();
       };
       await card.waitFor({ timeout: 15_000 });
-      await enter();
-      await closeToList();
-      await enter();
+      await enter(PLAYLIST.items[0]!);
+      await closeToList(PLAYLIST.items[2]!);
+      await enter(PLAYLIST.items[2]!);
       await page.goBack();
       await pathIs(page, `/assets/${PLAYLIST.items[1]}?playlist=${PLAYLIST.id}`);
       await page.locator(`#stage [data-queue-item="${PLAYLIST.items[1]}"][aria-current="true"]`).waitFor();
       await page.locator(DETAIL_READY).waitFor();
-      await closeToList();
+      await closeToList(PLAYLIST.items[1]!);
       assert.deepEqual(withoutPlayer(opened.problems), []);
     } finally {
       await opened.close();

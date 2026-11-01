@@ -255,7 +255,13 @@ class FollowupRunner:
             handle.finish("failed", error=f"没有登记 {run.task_key} 这种后继")
             return
         try:
-            summary = followup_type.run(self.contract, run.followup_key, handle)
+            from .task_control import bind, checkpoint, Cancelled
+            with bind(self.store, run.id, recoverable=True):
+                summary = followup_type.run(self.contract, run.followup_key, handle)
+                checkpoint()
+        except Cancelled:
+            handle.finish('cancelled', summary={'cancelled_by_user': True})
+            return
         except JobDeferred as error:
             self.store.suspend(run.id, label=str(error), paused_for_update=False)
             return error

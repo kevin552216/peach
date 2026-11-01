@@ -29,6 +29,9 @@ interface Route {
 
 const heading = (page: Page, scope: string, name: string): Locator =>
   page.locator(scope).getByRole('heading', { name, exact: true });
+/* 数据管理二级页的卡片标题与页头同名；只认页头那一层 h2，React 卡片何时挂载都只匹配一个。 */
+const pageTitle = (page: Page, name: string): Locator =>
+  page.locator('#main').getByRole('heading', { name, exact: true, level: 2 });
 
 const DESKTOP = VIEWPORTS.find((viewport) => !viewport.mobile)!;
 
@@ -112,8 +115,14 @@ const ROUTES: readonly Route[] = [
     // 挂载前的遗留骨架用 heading，最终 React 卡片用带名字的 section；等最终语义才能证明挂载完成。
     body: (page) => [heading(page, '#main', '数据管理'),
       page.locator('#stats section[aria-label="扫描与采集"]'),
-      page.locator('#stats section[aria-label="媒体修复"]')],
+      page.locator('#cleanup-pending'), page.locator('#cleanup-maintenance'), page.locator('#cleanup-deletion')],
   },
+  { path: '/data-cleanup/organize', body: page => [pageTitle(page, '整理文件'), page.locator('#stats #organize')] },
+  { path: '/data-cleanup/media-repair', body: page => [pageTitle(page, '媒体修复'), page.locator('#stats section[aria-label="媒体修复"]')] },
+  { path: '/data-cleanup/resource-sync', body: page => [pageTitle(page, '资源同步'), page.locator('#stats #resource-sync')] },
+  { path: '/data-cleanup/orphan-records', body: page => [pageTitle(page, '文件已丢失的记录'), page.locator('#stats #orphan-records')] },
+  { path: '/data-cleanup/links', body: page => [pageTitle(page, '链接管理'), page.locator('#stats #link-manager')] },
+  { path: '/data-cleanup/batch-delete', body: page => [pageTitle(page, '批量删除'), page.locator('#stats #batch-delete')] },
   {
     // 演示库里没有垃圾候选，等到的是垃圾队列那一页的空态标题；壳铺的骨架只有卡片占位。
     path: '/junk-files',
@@ -125,9 +134,9 @@ const ROUTES: readonly Route[] = [
     body: (page) => [heading(page, '#main', '重复文件'), page.locator('#stats').getByText('重复内容', { exact: true })],
   },
   {
-    // 旧直达地址落到数据管理页的锚点上；骨架里那一段没有 `id`，带 `id` 的只有演示库配了根目录后的真卡片。
+    // 旧直达地址进入资源同步二级页。
     path: '/resource-sync',
-    body: (page) => [heading(page, '#main', '数据管理'), page.locator('#stats section#resource-sync')],
+    body: (page) => [pageTitle(page, '资源同步'), page.locator('#stats section#resource-sync')],
   },
   {
     path: '/quality-goals',
@@ -284,7 +293,7 @@ describe('路由冒烟', () => {
     }
   });
 
-  /* 首页那一行新作只属于目录页：从首页进统计页要收起清空，取数还没回来就离开的那一轮
+  /* 首页那一行新作只属于目录页：从首页进统计页要收起保留，取数还没回来就离开的那一轮
      也不许回头把它画到管理区上。演示库没有订阅，新作由拦截的接口给一条。 */
   it('离开首页之后新作那一行收起，晚到的取数也不画回来', { timeout: 60_000 }, async () => {
     const opened = await visit(browser, '/stats', DESKTOP);
@@ -313,16 +322,23 @@ describe('路由冒烟', () => {
       await go('/stats');
       await expectBody(opened.page, '/stats', [statsInventoryTab(opened.page)]);
       assert.equal(await opened.page.locator('#feedNew').isHidden(), true, '进统计页之后新作那一行还露着');
-      assert.equal(await feedCards.count(), 0, '进统计页之后新作那一行没有清空');
+      assert.equal(await feedCards.filter({ visible: true }).count(), 0, '进统计页之后新作卡片仍可见');
 
+      const beforeReturn = served;
       await go('/');
       await expectBody(opened.page, '/', [feedCards.first()]);
+      assert.equal(served, beforeReturn, '返回首页沿用新作缓存');
       await go('/junk-files');
       await opened.page.locator('#count [data-junk-filters]').waitFor();
       assert.equal(await opened.page.locator('#feedNew').isHidden(), true, '垃圾文件页不展示订阅新作');
-      assert.equal(await feedCards.count(), 0);
+      assert.equal(await feedCards.filter({ visible: true }).count(), 0);
 
       for (const target of ['/stats', '/junk-files']) {
+        hold = null;
+        const reloadPath = new URL(opened.page.url()).pathname;
+        await opened.page.reload({ waitUntil: 'load' });
+        await expectBody(opened.page, reloadPath, [reloadPath === '/stats'
+          ? statsInventoryTab(opened.page) : opened.page.locator('#count [data-junk-filters]')]);
         let release!: () => void;
         hold = new Promise((resolve) => { release = resolve; });
         const asked = opened.page.waitForRequest(/\/api\/feeds\/discoveries\?/);
@@ -337,7 +353,8 @@ describe('路由冒烟', () => {
         assert.ok(served > before, '压住的那一次新作取数没有放行');
         // 回包之后页面只剩一次同步重画；目录区的旧加载态不属于当前页面。
         await opened.page.waitForTimeout(500);
-        assert.equal(await feedCards.count(), 0, `晚到的新作取数画到了 ${target} 上`);
+        assert.equal(await opened.page.locator('#feedNew').isHidden(), true);
+        assert.equal(await feedCards.filter({ visible: true }).count(), 0, `晚到的新作取数画到了 ${target} 上`);
         await assertHolds(opened.page, opened.problems, `首页与 ${target} 往返`);
       }
     } finally {

@@ -18,6 +18,7 @@ from .media_processing_policy import metadata_only
 from .processing_control import (bind_control, checkpoint, initial_estimate,
                                  resume_fields, task_control, processing_item, ItemSkipped)
 from .review_csv import read_rows, write_rows
+from .task_control import Cancelled as TaskCancelled
 from .update_tasks import activity
 
 TASKS = ('scan', 'probe', 'metadata', 'covers', 'previews')
@@ -208,10 +209,10 @@ class SelectedProcessing:
             self.update(stage=LABELS[task], checked=0, total=len(self.rows))
             getattr(self, 'do_' + task)()
             self.task_state(task, 'complete')
-        except Exception as error:
+        except (Exception, TaskCancelled) as error:
             with self.lock:
                 self.errors.append(error)
-                stopped = isinstance(error, ProcessingStopped) or self.control is not None and self.control.cancelled
+                stopped = isinstance(error, (ProcessingStopped, TaskCancelled)) or self.control is not None and self.control.cancelled
                 progress = self.state['work_progress'][task]
                 progress['status'] = 'cancelled' if stopped else 'failed'
                 progress['failed'] += int(not stopped and not isinstance(error, JobPaused))
@@ -256,7 +257,7 @@ class SelectedProcessing:
                 self.publish(status='failed' if self.state['issue_count'] else 'complete', stage='处理结束',
                     completed_at=time.time(), current_asset_id=None, current_asset_name='', current_action='',
                     error=engine.issue_summary(self.state['issue_count'], self.state['paused_count']))
-            except Exception as error:
+            except (Exception, TaskCancelled) as error:
                 self.settle_interruption(error)
             finally:
                 if self.remote is not None:
@@ -275,7 +276,7 @@ class SelectedProcessing:
             for future in futures:
                 try:
                     future.result()
-                except Exception:
+                except (Exception, TaskCancelled):
                     self.cancel.set()
 
     def finish_metadata_policy(self):
@@ -299,17 +300,19 @@ class SelectedProcessing:
             self.run_task(task)
 
     def settle_interruption(self, error):
-        if isinstance(error, JobPaused):
-            self.publish(waiting_for_update=True, stage='等待安装完成后继续')
-            raise error
-        cancelled = isinstance(error, ProcessingStopped) or self.control is not None and self.control.cancelled
+        cancelled = isinstance(error, (ProcessingStopped, TaskCancelled)) or self.control is not None and self.control.cancelled
         if self.control is not None and self.control.paused and not cancelled:
             with self.lock:
                 for progress in self.state['work_progress'].values():
                     if progress['status'] != 'complete':
                         progress['status'] = 'pending'
-            self.publish(status='paused', completed_at=None, followups=[], error='')
+            self.publish(status='paused', completed_at=None, followups=[], error='', waiting_for_update=False)
+            if isinstance(error, JobPaused):
+                raise error
             return
+        if isinstance(error, JobPaused):
+            self.publish(waiting_for_update=True, stage='等待安装完成后继续')
+            raise error
         status = 'cancelled' if cancelled else 'failed'
         with self.lock:
             for progress in self.state['work_progress'].values():
@@ -317,6 +320,8 @@ class SelectedProcessing:
                     progress['status'] = status
         self.publish(status=status, stage='已停止' if cancelled else '处理未完成', followups=[],
                      completed_at=time.time(), error='' if cancelled else f'{type(error).__name__}: {error}')
+        if isinstance(error, TaskCancelled):
+            raise error
         if self.selection['legacy_policy'] and not cancelled:
             raise error
 

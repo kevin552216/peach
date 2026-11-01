@@ -98,14 +98,17 @@ describe('侧栏岛', () => {
       await page.mouse.move(to.x + 40, to.y + 6, { steps: 8 });
       await page.mouse.move(to.x + 42, to.y + 7, { steps: 2 });
       assert.equal(await page.locator('#drawer [data-nav="tags"]').getAttribute('data-dragging'), '', '被拖的那一项没有标出来');
-      assert.equal(await page.locator('#drawer [data-nav="follow"]').getAttribute('data-drop'), 'before', '落点没有画在目标上沿');
+      const line = await page.locator('#drawer [data-sidebar-drop-line]').boundingBox();
+      assert.ok(line && line.width > 0, '插入线没有显示');
+      assert.equal(await page.locator('#drawer [data-nav="follow"]').evaluate(node => node.style.getPropertyValue('--sidebar-nudge')), '10px');
+      assert.equal(await page.locator('#drawer [data-nav="jav"]').evaluate(node => node.style.getPropertyValue('--sidebar-delay')), '24ms');
       await page.mouse.up();
       const moved = ['', 'tags', 'follow', 'jav', 'performers', 'studios', 'flagged', 'manage'];
       await page.waitForFunction((want) => JSON.stringify([...document.querySelectorAll('#drawer [data-sidebar-nav] [data-nav]')]
         .map((node) => node.getAttribute('data-nav'))) === want, JSON.stringify(moved), { timeout: 5_000 });
       const posts = server.posts.filter((post) => post.path === '/api/settings' && 'sidebarOrder' in post.body);
       assert.deepEqual(posts.at(-1)?.body.sidebarOrder, moved, '新顺序没有写进设置');
-      assert.equal(await page.locator('#drawer [data-dragging], #drawer [data-drop]').count(), 0, '松手后拖动标记没有清掉');
+      assert.equal(await page.locator('#drawer [data-dragging], #drawer [data-sidebar-drop-line]').count(), 0, '松手后拖动标记没有清掉');
 
       await page.reload({ waitUntil: 'load' });
       await page.locator('#drawer [data-sidebar-nav] [data-nav]').first().waitFor({ timeout: 15_000 });
@@ -115,6 +118,60 @@ describe('侧栏岛', () => {
     } finally {
       await opened.close();
     }
+  });
+
+  it('Esc 和拖出导航区域取消排序，不保存也不触发导航', { timeout: 60_000 }, async () => {
+    const opened = await openHome(browser);
+    const { page, server } = opened;
+    try {
+      for (const escape of [true, false]) {
+        const from = (await page.locator('#drawer [data-nav="tags"]').boundingBox())!;
+        const to = (await page.locator('#drawer [data-nav="follow"]').boundingBox())!;
+        await page.mouse.move(from.x + 40, from.y + from.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(to.x + 40, to.y + 4, { steps: 8 });
+        if (escape) await page.keyboard.press('Escape');
+        else await page.mouse.move(600, to.y + 4, { steps: 4 });
+        await page.mouse.up();
+        assert.deepEqual(await navKeys(page), ORDER);
+        assert.equal(new URL(page.url()).pathname, '/');
+        assert.equal(await page.locator('#drawer [data-dragging],#drawer [data-sidebar-drop-line]').count(), 0);
+      }
+      assert.equal(server.posts.filter(post => post.path === '/api/settings' && 'sidebarOrder' in post.body).length, 0);
+      assert.deepEqual(opened.problems, []);
+    } finally { await opened.close() }
+  });
+
+  it('关注页往返复用已加载内容，不重新取列表或铺首屏骨架', { timeout: 60_000 }, async () => {
+    const opened = await openFollowFeed(browser, '/follow', DESKTOP);
+    const { page } = opened;
+    let requests = 0;
+    page.on('request', request => { if (new URL(request.url()).pathname === '/api/follow') requests++ });
+    try {
+      const items = () => page.locator('[data-follow-list] > [data-follow-item]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-follow-item')));
+      const before = await items();
+      await page.evaluate(() => {
+        const tracking = { skeletons: 0 };
+        Object.assign(window, { followReturnTracking: tracking });
+        new MutationObserver(records => {
+          for (const record of records) for (const node of record.addedNodes) {
+            if (node instanceof Element && (node.matches('[data-skeleton-tier]') || node.querySelector('[data-skeleton-tier]'))) tracking.skeletons++;
+          }
+        }).observe(document.getElementById('stats')!, { childList: true, subtree: true });
+      });
+      for (let round = 0; round < 2; round++) {
+        await page.locator('#drawer [data-nav=""]').click();
+        await page.locator('#grid [data-media-body]').waitFor({ state: 'visible' });
+        await page.locator('html[data-page-navigation-pending]').waitFor({ state: 'detached' });
+        await page.locator('#drawer [data-nav="follow"]').click();
+        await page.locator('[data-follow-list] > [data-follow-item]').first().waitFor({ state: 'visible' });
+        await page.locator('html[data-page-navigation-pending]').waitFor({ state: 'detached' });
+        assert.deepEqual(await items(), before);
+      }
+      assert.equal(requests, 0);
+      assert.equal(await page.evaluate(() => (window as unknown as { followReturnTracking: { skeletons: number } }).followReturnTracking.skeletons), 0);
+      assert.deepEqual(withoutPlayer(opened.problems), []);
+    } finally { await opened.close() }
   });
 
   it('首页与实体页各按自己的口径列内容标签与计数；点一枚 chip 就按下并进地址', { timeout: 60_000 }, async () => {

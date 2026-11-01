@@ -9,7 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as legacyUi from '@peach/legacy/ui';
 
 import type { DataCleanupSection } from '../../src/react/bundle';
-import { DataCleanupPage } from '../../src/react/data-cleanup/data-cleanup-page';
+import { DataCleanupPage, DataCleanupToolPage } from '../../src/react/data-cleanup/data-cleanup-page';
+import { prefetchDataCleanupTool } from '../../src/react/data-cleanup/data-cleanup';
+import type { CleanupToolKey } from '../../src/cleanup-tools';
 import { junkBreakdown, prefetchDataCleanup, reviewSummary } from '../../src/react/data-cleanup/data-cleanup';
 import { LinkManager } from '../../src/react/data-cleanup/link-manager';
 import type { LinkCheckState } from '../../src/react/data-cleanup/links';
@@ -122,9 +124,18 @@ async function openPage(sources: MediaSourcesData = withRoots, patch: Record<str
   const server = serve({ ...pageRoutes(sources), ...patch });
   await prefetchDataCleanup(new AbortController().signal);
   const open = vi.fn<(section: DataCleanupSection) => void>();
-  const host = await wrap(<DataCleanupPage toast={vi.fn()} failure={vi.fn()} open={open} />);
+  const navigate = vi.fn<(path: string) => void>();
+  const host = await wrap(<DataCleanupPage toast={vi.fn()} failure={vi.fn()} open={open} navigate={navigate} />);
   await settle();
-  return { host, open, server };
+  return { host, open, navigate, server };
+}
+
+async function openTool(tool: CleanupToolKey, sources: MediaSourcesData = withRoots, patch: Record<string, Route> = {}) {
+  const server = serve({ ...pageRoutes(sources), ...patch });
+  await prefetchDataCleanupTool(tool, new AbortController().signal);
+  const host = await wrap(<DataCleanupToolPage tool={tool} toast={vi.fn()} failure={vi.fn()} />);
+  await settle();
+  return { host, server };
 }
 
 const entry = (host: ParentNode, section: DataCleanupSection) =>
@@ -132,7 +143,10 @@ const entry = (host: ParentNode, section: DataCleanupSection) =>
 
 describe('读数卡', () => {
   it('单面板分区的标题只在面板内显示', async () => {
-    const { host } = await openPage();
+    serve(pageRoutes(withRoots));
+    const host = await wrap(<><DataCleanupToolPage tool="links" toast={vi.fn()} failure={vi.fn()} />
+      <DataCleanupToolPage tool="resource-sync" toast={vi.fn()} failure={vi.fn()} /></>);
+    await settle();
     for (const id of ['link-manager', 'resource-sync']) {
       const section = host.querySelector(`#${id}`)!;
       const title = section.querySelector(`#${id}-title`)!;
@@ -178,18 +192,19 @@ describe('读数卡', () => {
 });
 
 describe('资源同步', () => {
-  it('只在有落盘来源配了根目录时出现，两份任务状态随首屏一起取回', async () => {
+  it('首页不读取资源扫描，进入二级页后才按已配置根目录读取', async () => {
     expect(hasResourceRoots(withRoots)).toBe(true);
     expect(hasResourceRoots(withoutRoots)).toBe(false);
     const server = serve(pageRoutes(withRoots));
     await prefetchDataCleanup(new AbortController().signal);
-    expect(server.calls.map((call) => call.path)).toEqual(expect.arrayContaining(['/api/resource-sync/scan', '/api/resource-sync/apply']));
+    expect(server.calls.some(call => call.path.startsWith('/api/resource-sync'))).toBe(false);
     queryClient.clear();
-    const shown = await openPage(withRoots);
+    const shown = await openTool('resource-sync', withRoots);
     expect(shown.host.querySelector('#resource-sync')).not.toBeNull();
     queryClient.clear();
-    const hidden = await openPage(withoutRoots);
+    const hidden = await openTool('resource-sync', withoutRoots);
     expect(hidden.host.querySelector('#resource-sync')).toBeNull();
+    expect(hidden.host.textContent).toContain('尚未配置可核对的媒体目录');
     expect(hidden.server.calls.some((call) => call.path.startsWith('/api/resource-sync'))).toBe(false);
   });
 
@@ -349,7 +364,7 @@ describe('资源同步', () => {
 
 describe('链接管理', () => {
   it('主要站点分别链接到主页并通过本站读取 favicon，图标失败时保留链接', async () => {
-    const { host } = await openPage(withRoots, {
+    const { host } = await openTool('links', withRoots, {
       '/api/links': { total: 8, entities: 3, by_kind: {}, top_hosts: [['example.com', 5], ['example.org', 3]], top_host_link_ids: { 'example.com': 8, 'example.org': 9 } },
     });
     const link = host.querySelector<HTMLAnchorElement>('#link-manager a[href="https://example.com"]')!;
@@ -492,9 +507,10 @@ describe('孤儿记录', () => {
     ],
   };
 
-  it('没有已消失的作品时整块不出现', async () => {
-    const { host, server } = await openPage();
-    expect(host.querySelector('#orphan-records')).toBeNull();
+  it('没有已消失的作品时二级页保留空表和零计数', async () => {
+    const { host, server } = await openTool('orphan-records');
+    expect(host.querySelector('#orphan-records')?.textContent).toContain('0 条作品');
+    expect(host.querySelectorAll('#orphan-records tbody tr[data-row-id]')).toHaveLength(0);
     expect(server.calls.map((call) => call.path)).toContain('/api/orphan-records');
   });
 

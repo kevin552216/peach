@@ -992,7 +992,8 @@ class StandaloneConfigurationTests(_Case):
         from peach.automatic_updates import AutomaticUpdates
         path = "/api/configuration/automatic-updates"
         headers = {"X-Token": "test-token"}
-        with self.client() as client:
+        # 自动下载只在有应用内更新的 Windows 独立包上可选；macOS 被拒见 test_automatic_updates。
+        with self.client() as client, mock.patch("peach.distribution.in_app_update", return_value=True):
             client.app.state.automatic_updates = AutomaticUpdates(self.root, available=True)
             self.assertEqual(client.get(path).status_code, 401)
             self.assertEqual(client.post(path, headers=dict(headers, Origin="https://evil.example"),

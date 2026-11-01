@@ -413,6 +413,11 @@ class SourceTransport:
         self.requests = self.bytes = 0
 
     def __call__(self, request: HttpRequest, timeout: float, max_bytes: int):
+        from .task_control import operation
+        with operation():
+            return self._controlled_request(request, timeout, max_bytes)
+
+    def _controlled_request(self, request: HttpRequest, timeout: float, max_bytes: int):
         for _ in range(6):
             from .processing_control import checkpoint
             checkpoint('network')

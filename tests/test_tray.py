@@ -1120,6 +1120,59 @@ class MacMenuBarTests(unittest.TestCase):
             self.assertTrue(str(specs["https"].verify).endswith("peach-local-ca.crt"))
 
 
+class MacMenuBarActionTests(unittest.TestCase):
+    """菜单栏用替身 AppKit 层构造，处理函数在任何系统上都能直接调用。"""
+
+    def test_menu_bar_offers_update_check_and_diagnostics_like_the_windows_tray(self):
+        """Windows 托盘有的「检查更新」「导出诊断报告」，菜单栏项同样要有，且真的接上实现。"""
+        import types
+        built = {}
+
+        class Submenu:
+            def __init__(self, items):
+                self.items = items
+
+        class MenuBarApp:
+            def __init__(self, _icon, _title, items):
+                built["items"] = items
+                self.notices = built.setdefault("notices", [])
+
+            def notify(self, message, title):
+                self.notices.append((title, message))
+
+            def run(self):
+                pass
+
+            def stop(self):
+                pass
+
+        def run_handler(label, *, submenu=None):
+            items = built["items"]
+            if submenu:
+                items = next(handler for title, handler in items if title == submenu).items()
+            handler = next(handler for title, handler in items if title == label)
+            handler()
+            for thread in threading.enumerate():
+                if thread.name in {"PeachUpdate", "PeachDiagnostics"}:
+                    thread.join(5)
+
+        versions = Mock()
+        versions.inspect.return_value = Mock(package_version="0.9.0", build_label="独立测试包", channel_label="测试版")
+        versions.check.return_value = UpdateResult("available", "当前版本：0.9.0。最新测试版：1.0.0。有新版本可下载。",
+                                                   versions.inspect.return_value)
+        fake = types.ModuleType("peach.menubar")
+        fake.MenuBarApp, fake.Submenu = MenuBarApp, Submenu
+        with patch.dict(sys.modules, {"peach.menubar": fake}),                 patch.object(tray_module, "VersionManager", return_value=versions),                 patch.object(tray_module, "standalone", return_value=True):
+            tray_module.run_macos_menu_bar(Mock(), Mock(waiting=False))
+        with tempfile.TemporaryDirectory() as directory,                 patch("peach.support_bundle.save_bundle", return_value=Path(directory) / "peach-support.zip"),                 patch.object(tray_module.subprocess, "run") as opened:
+            run_handler("导出诊断报告")
+            run_handler("检查更新", submenu="版本与更新")
+        self.assertEqual(opened.call_args.args[0][:2], ["open", "-R"])
+        versions.check.assert_called_once()
+        self.assertIn(("Peach 诊断报告", "诊断报告已保存：peach-support.zip"), built["notices"])
+        self.assertIn(("Peach 版本与更新", versions.check.return_value.message), built["notices"])
+
+
 class TemplateHookTests(unittest.TestCase):
     def test_apply_template_is_a_no_op_without_a_backing_nsimage(self):
         """拿不到底层 NSImage 就安静跳过：菜单栏项本身仍然可用。"""

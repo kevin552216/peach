@@ -39,6 +39,7 @@
 @import "./settings-panel/settings-panel.css";
 @import "./immerse/immerse.css";
 @import "./sidebar/sidebar.css";
+@import "./onboarding/tutorial.css";
 @import "./base.css";
 @import "../ui-kit/motion.css";
 @import "../core/core.css";
@@ -62,6 +63,13 @@
 @import "../pagination.css";
 
 @source "./";
+
+@utility async-text-skeleton {
+  height: .65em;
+}
+[data-async-text-value][aria-hidden="true"] { opacity: 0; }
+[data-async-text-skeleton] { opacity: 0; }
+[data-async-text][aria-busy="true"] > [data-async-text-skeleton] { opacity: 1; }
 /* 独立页面包（`pages/`）有自己的产物 `peach-pages.css`，它用到的工具类不进这一份。 */
 @source not "./pages";
 @source "../management-skeletons.ts";
@@ -288,6 +296,18 @@
 /* 占位换成真内容，与 `src/ui-kit/motion.css` 的 `.skelreveal` 同一形态：骨架淡出
  * 并糊掉，内容从 2px 模糊里清晰起来，两层叠在同一处坐标。元素带上 `data-revealed`
  * 就是揭开之后那一态。时长读 board.css 的 `--motion-reveal`，减少动效时它是 0s。 */
+.peach-react [data-content-transition] { display: grid; position: relative; min-width: 0; }
+.peach-react [data-content-transition] > :is([data-content-current], [data-content-skeleton]) {
+  grid-area: 1 / 1; min-width: 0; transition: opacity var(--motion-content), visibility var(--motion-content);
+}
+.peach-react [data-content-current] { opacity: 1; }
+.peach-react [data-content-skeleton] { position: absolute; inset: 0; opacity: 0; visibility: hidden; pointer-events: none; }
+.peach-react [data-content-transition][data-pending] > [data-content-current] { opacity: 0; }
+.peach-react [data-content-transition][data-pending] > [data-content-skeleton] { position: relative; opacity: 1; visibility: visible; }
+.peach-react :is([data-async-text-value], [data-async-text-skeleton]) { transition: opacity var(--motion-content); }
+@starting-style {
+  .peach-react [data-content-transition][data-pending] > [data-content-skeleton] { opacity: 0; }
+}
 @utility reveal-skeleton {
   transition: opacity var(--motion-reveal), filter var(--motion-reveal);
   &[data-revealed] { opacity: 0; filter: blur(2px); }

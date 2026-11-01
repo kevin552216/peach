@@ -12,6 +12,8 @@ it('三类对象与队列兼容地址保留筛选和播放位置', () => {
     expect(overlayTarget('/assets/22', `?${key}=21&t=42`)).toEqual({ kind: 'queue', queue: key, key: 21, item: 22 });
   }
   expect(canonicalPath('/api/item?id=12')).toBe('/api/item?id=12');
+  expect(canonicalPath('/data-cleanup?edit#resource-sync')).toBe('/data-cleanup/resource-sync?edit');
+  expect(canonicalPath('/data-cleanup#libraryProcessing')).toBe('/data-cleanup#libraryProcessing');
   for (const [source, target] of [['activity', 'tasks'], ['scraping', 'sources'],
     ['follow-manage', 'subscriptions'], ['configuration', 'settings/library'], ['diagnostics', 'settings/diagnostics']]) {
     expect(canonicalPath(`/${source}?tab=x`)).toBe(`/${target}?tab=x`);

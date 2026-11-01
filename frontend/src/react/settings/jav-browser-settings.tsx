@@ -50,7 +50,7 @@ function BrowserForm({ initial, receipt }: { initial: State; receipt(message: st
     });
   };
   const ready = state.providers.some(item => item.key === provider && item.configured && item.target);
-  return <Section title="浏览器添加 JAV">
+  return <Section guide="browser" title="浏览器添加 JAV">
     <Stack>
       <div className="flex min-w-0 flex-col gap-4">
       <UserscriptStatus enabled={state.enabled} release={state.userscript} />

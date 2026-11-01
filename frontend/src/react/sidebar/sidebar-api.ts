@@ -68,6 +68,8 @@ export interface SidebarHost {
   /** 这一项此刻亮不亮（壳的 `navOn`，读地址与目录筛选）。 */
   navOn(key: string): boolean;
   navTo(key: string): void;
+  /** 双击导航时平滑回顶，保留该栏目内容和筛选。 */
+  navToTop(): void;
   /** 一枚目录筛选键：`multi` 的组按逗号列表增减，其余组单选、再点一次取消。 */
   toggleChip(key: string, value: string, multi: boolean): void;
   /** 时长两端松手（分钟）：0 与 180 表示这一端不限。 */

@@ -9,12 +9,15 @@ import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from .task_control import run as run_task_process
 
 logger = logging.getLogger(__name__)
 CUDA_DECODE_CODECS = frozenset({"h264", "hevc", "vp9", "av1"})
 VIDEOTOOLBOX_DECODE_CODECS = frozenset({"h264", "hevc", "av1", "prores"})
 #: D3D11VA 与 CUDA 同一份名单：名单外的编码（如 vc1）硬解出错时 FFmpeg 不报错，绿帧直接进缓存。
 D3D11_DECODE_CODECS = CUDA_DECODE_CODECS
+#: Linux 抽帧的 VAAPI 解码沿用同一份名单，理由同上。
+VAAPI_DECODE_CODECS = CUDA_DECODE_CODECS
 #: AMF 只认 AMD 显卡上的 D3D11 设备，混合显卡机器上默认序号常是别家，按序号逐个试。
 D3D11_ADAPTER_PROBES = 4
 BACKENDS = ("auto", "software", "nvenc", "amf", "qsv", "vaapi", "videotoolbox")
@@ -39,12 +42,24 @@ def d3d11va_decode_options(codec: str, device: str = "") -> tuple[str, ...]:
     return ("-hwaccel", "d3d11va", *(("-hwaccel_device", device) if device else ()))
 
 
+def vaapi_devices(configured: str = "") -> list[str]:
+    """`PEACH_VAAPI_DEVICE` 指定了就只用它，否则按序号列出本机的 DRM 渲染节点。"""
+    return [configured] if configured else sorted(p.as_posix() for p in Path("/dev/dri").glob("renderD*"))
+
+
+def vaapi_decode_options(codec: str, device: str) -> tuple[str, ...]:
+    """Linux 显卡解码。同 D3D11VA，不指定输出格式，解出的帧回到内存交给缩放与 JPEG 编码。"""
+    if codec not in VAAPI_DECODE_CODECS:
+        return ()
+    return ("-hwaccel", "vaapi", "-hwaccel_device", device)
+
+
 def _run_probe(ffmpeg: Path, label: str, arguments: tuple[str, ...]) -> bool:
     """跑一条只吃合成画面、输出丢弃的探测命令；失败记一条警告。"""
     command = (str(ffmpeg), "-hide_banner", "-loglevel", "error", "-nostdin", *arguments,
                "-f", "null", "-")
     try:
-        result = subprocess.run(
+        result = run_task_process(
             command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE, timeout=PROBE_TIMEOUT_SECONDS,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -64,6 +79,15 @@ def _d3d11va_ready(ffmpeg: str) -> bool:
     return _run_probe(Path(ffmpeg), "d3d11va", ("-init_hw_device", "d3d11va", *_SYNTHETIC_FRAME))
 
 
+@lru_cache(maxsize=8)
+def _vaapi_device(ffmpeg: str, configured: str) -> str:
+    """第一个这份 FFmpeg 建得出 VAAPI 设备的渲染节点；容器没映射 `/dev/dri` 时为空。"""
+    for device in vaapi_devices(configured):
+        if _run_probe(Path(ffmpeg), f"vaapi {device}", ("-init_hw_device", f"vaapi=va:{device}", *_SYNTHETIC_FRAME)):
+            return device
+    return ""
+
+
 @lru_cache(maxsize=128)
 def _frame_codec(ffprobe: str, source: str, size: int, modified: int) -> str:
     from .media_probe import probe_file
@@ -76,14 +100,18 @@ def _frame_codec(ffprobe: str, source: str, size: int, modified: int) -> str:
 def frame_decode_options(ffmpeg: str, source: str) -> tuple[str, ...]:
     """本机抽帧按文件世代复用编码探测，解码初始化失败由调用方回退。
 
-    Windows 只给名单内的编码开 D3D11VA，编码探测不到就软件解码。
+    Windows 与 Linux 只给名单内的编码开 D3D11VA／VAAPI，编码探测不到就软件解码。
     """
-    if sys.platform not in ("darwin", "win32") or not Path(ffmpeg).is_file():
+    linux = sys.platform.startswith("linux")
+    if not (linux or sys.platform in ("darwin", "win32")) or not Path(ffmpeg).is_file():
         return ()
     from .media_processing_policy import acceleration
     if acceleration(purpose="preview") == "software" or os.environ.get("PEACH_TRANSCODE_BACKEND") == "software":
         return ()
     if sys.platform == "win32" and not _d3d11va_ready(ffmpeg):
+        return ()
+    device = _vaapi_device(ffmpeg, os.environ.get("PEACH_VAAPI_DEVICE", "").strip()) if linux else ""
+    if linux and not device:
         return ()
     codec = ""
     ffprobe = Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)
@@ -96,6 +124,8 @@ def frame_decode_options(ffmpeg: str, source: str) -> tuple[str, ...]:
         pass
     if sys.platform == "win32":
         return d3d11va_decode_options(codec)
+    if linux:
+        return vaapi_decode_options(codec, device)
     return videotoolbox_decode_options(codec)
 
 
@@ -187,8 +217,7 @@ class HardwareTranscoder:
         if windows:
             candidates.append(HardwareEncoder("d3d11va"))
         if self.backend == "vaapi" or (self.backend == "auto" and sys.platform.startswith("linux")):
-            devices = [self.device] if self.device else sorted(p.as_posix() for p in Path("/dev/dri").glob("renderD*"))
-            candidates.extend(HardwareEncoder("vaapi", device) for device in devices)
+            candidates.extend(HardwareEncoder("vaapi", device) for device in vaapi_devices(self.device))
         return tuple(candidates)
 
     def active(self) -> bool:

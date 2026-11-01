@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from peach import job_recovery
-from peach.library_processing import process_library
+from peach.library_processing import process_library, snapshot
 from peach.library_processing_tasks import selection_for
 from peach.processing_control import checkpoint, control_for
 from peach.repository import LedgerDatabase
@@ -55,6 +55,23 @@ class SelectedProcessingTests(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as connection:
             connection.row_factory = sqlite3.Row
             return [dict(row) for row in connection.execute('SELECT * FROM asset ORDER BY id')]
+
+    def test_native_task_cancellation_settles_selected_progress_and_propagates(self):
+        from peach.task_control import Cancelled
+        self.seed()
+        self.provider.query.side_effect = Cancelled('用户取消')
+        for execution in ('sequential', 'parallel'):
+            with self.subTest(execution=execution):
+                with self.assertRaises(Cancelled):
+                    self.run_selected(['metadata', 'covers'], execution_mode=execution)
+                state = snapshot(self.config)
+                self.assertEqual(state['status'], 'cancelled')
+                self.assertEqual(state['error'], '')
+                self.assertFalse(state['followups'])
+                self.assertEqual({value['status'] for value in state['work_progress'].values()}, {'cancelled'})
+                self.assertEqual(state['work_progress']['metadata']['failed'], 0)
+        self.provider.cover.assert_not_called()
+        self.assertIsNone(self.rows()[0]['catalog_title'])
 
     def test_selected_metadata_skip_keeps_the_next_asset_eligible(self):
         self.seed(count=2)
@@ -356,9 +373,16 @@ class SelectedProcessingTests(unittest.TestCase):
         self.seed(duration=30)
         runs = TaskRunStore(self.database)
         first = BackgroundJob('library-processing', runs=runs)
-        contract = SimpleNamespace(db_path=self.db, library_processing_job=first, database=self.database,
+        contract = SimpleNamespace(db_path=self.db, library_processing_job=first, database=self.database, task_runs=runs,
             candidate_root=self.root / 'generated', cover_root=self.root / 'covers', cache_bust=lambda: None)
         entered, advance, paused = (threading.Event() for _ in range(3))
+        def stop_workers():
+            advance.set()
+            for job in (first, contract.library_processing_job):
+                if job.thread is not None and job.thread.is_alive():
+                    job.stop()
+                    job.thread.join(5)
+        self.addCleanup(stop_workers)
         calls = []
         def media(*args, **kwargs):
             calls.append(control_for(self.config).mode)

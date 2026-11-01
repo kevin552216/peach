@@ -36,10 +36,13 @@ export function swapText(el:any,text:unknown,{html=false}={}):void{
   if(previous===next&&(el.textContent||'').length)return;
   el.dataset.swapText=next;
   el.classList.add('textswap');
-  if(previous===undefined||previous===next){write();return}
+  if(previous===undefined||previous===next||window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    el.classList.remove('leaving','entering');write();return;
+  }
   el.classList.remove('entering');
   el.classList.add('leaving');
   const enter=()=>{
+    if(el.dataset.swapText!==next)return;
     el.classList.remove('leaving');
     write();
     el.classList.add('entering');

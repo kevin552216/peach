@@ -83,13 +83,13 @@ export function DiagnosticsPage(props: DiagnosticsProps) {
   const attention = Object.entries(data.checks).filter(([, check]) => ['warning', 'failed', 'unknown'].includes(check.status));
   const other = Object.entries(data.checks).filter(([, check]) => !['warning', 'failed', 'unknown'].includes(check.status));
   return <div className="flex min-w-0 flex-col gap-6">
-    <div className="flex flex-wrap justify-end gap-2"><DownloadReport />
+    <div data-guide-target="report" className="flex flex-wrap justify-end gap-2"><DownloadReport />
       <Button variant="secondary" onClick={refresh} {...busyProps(action.busy === 'refresh')}>重新检查</Button></div>
     {refreshError ? <Note tone="error">{refreshError}</Note> : null}
-    {attention.length ? <Section title={`需要关注 · ${attention.length} 项`}>
+    {attention.length ? <Section guide="attention" title={`需要关注 · ${attention.length} 项`}>
       {attention.map(([key, check]) => <Check key={key} name={key} check={check} />)}
     </Section> : null}
-    <Section title="库健康"><Stack>
+    <Section guide="health" title="库健康"><Stack>
       {data.library.issue_at ? <p className="text-body-2-regular text-text-secondary">处理记录 · {moment(data.library.issue_at)}</p> : null}
       {Object.entries(data.library.groups).map(([key, group]) => <HealthList key={key} group={group} {...props} />)}
     </Stack></Section>
@@ -107,7 +107,7 @@ export function DiagnosticsPage(props: DiagnosticsProps) {
       </Disclosure>
     </section> : null}
     <ScrapingExport />
-    <section aria-label="来源会话" className="flex min-w-0 flex-col gap-3">
+    <section data-guide-target="sessions" aria-label="来源会话" className="flex min-w-0 flex-col gap-3">
       <SettingsSectionLabel>来源会话</SettingsSectionLabel>
       {data.sources.map(source => <article key={source.source} data-diagnostic-source={source.source}>
         <SettingsCard><Stack>

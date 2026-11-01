@@ -82,12 +82,21 @@ class UpdateTaskTests(unittest.TestCase):
             release.wait(5)
         original = job.start(work, recovery={})
         worker = job.thread
-        self.assertTrue(entered.wait(5))
-        job.stop(timeout=0, resume=False)
-        release.set()
-        worker.join(5)
+        try:
+            self.assertTrue(entered.wait(5))
+            job.stop(timeout=0, resume=False)
+            self.assertTrue(worker.is_alive())
+            self.assertEqual(self.store.get(original['run_id']).status, 'running')
+            self.assertEqual(job_recovery.read(self.db, 'feed-check')['job_id'], original['job_id'])
+        finally:
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
         self.assertEqual(job_recovery.read(self.db, 'feed-check'), {})
         self.assertEqual(self.store.get(original['run_id']).status, 'cancelled')
+        replay = []
+        self.assertEqual(job_recovery.resume(self.db, {'feed-check': replay.append}), [])
+        self.assertEqual(replay, [])
 
     def test_running_tasks_receive_a_pause_request_when_installation_is_accepted(self):
         for trigger in ('manual', 'scheduled'):

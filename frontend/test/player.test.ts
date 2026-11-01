@@ -9,6 +9,7 @@ import {
   cancelDetailStream, detailStreamSource, detailStreamSession, directStreamSource, playableStreamSource,
 } from '../src/player/stream';
 import { mountPlayer } from '../src/player/detail-player';
+import { beginPlayerGuidePreview } from '../src/player/guide-preview';
 import { wireTelemetry } from '../src/player/telemetry';
 import type { QualityLevel, QualityLevelList, VjsPlayer } from '../src/player/types';
 import * as videojsLoader from '../src/player/videojs';
@@ -37,6 +38,36 @@ const host = (seekSeconds = 10): PlayerHost => ({
 });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+it('播放器导览抑制片源与自动播放，结束后沿用已保存的播放偏好', async () => {
+  const settings = { ...host().settings(), detailAutoplay: true };
+  const saveSettings = vi.fn();
+  configurePlayer({ ...host(), settings: () => settings, saveSettings });
+  const sources = vi.fn(), play = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(videojsLoader, 'ensureVideojs').mockResolvedValue(vi.fn((video: HTMLVideoElement) => {
+    const shell = document.createElement('div'); shell.append(video);
+    let disposed = false;
+    return {
+      el: () => shell, on: () => {}, one: () => {}, ready: () => {},
+      isDisposed: () => disposed, dispose: () => { disposed = true }, pause: () => {},
+      src: sources, play, duration: () => 0, currentSource: () => ({}),
+    } as unknown as VjsPlayer;
+  }));
+  const calls = stubFetch(() => ({ protocol: 'range', src: '/stream?id=42', mime_type: 'video/mp4' }));
+  const finishGuide = beginPlayerGuidePreview();
+  const releaseGuide = mountPlayer(document.createElement('video'), { kind: 'item', item: { id: 42 }, chrome: false });
+  try {
+    await flush(); await flush();
+    expect(sources).not.toHaveBeenCalled(); expect(play).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  } finally { releaseGuide(); finishGuide() }
+  const releaseNormal = mountPlayer(document.createElement('video'), { kind: 'item', item: { id: 42 }, chrome: false });
+  try {
+    await flush(); await flush();
+    expect(sources).toHaveBeenCalled(); expect(play).toHaveBeenCalledOnce();
+    expect(settings.detailAutoplay).toBe(true); expect(saveSettings).not.toHaveBeenCalled();
+  } finally { releaseNormal(); configurePlayer(host()) }
+});
 
 describe('片源判据', () => {
   it('保存过的在线作品走关注条目的代理，不问 stream-plan', async () => {

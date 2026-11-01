@@ -21,7 +21,9 @@ import { apiGet, apiSend } from '../../api';
 import { LoadMore } from '../catalog-grid/catalog-grid-page';
 import { FilterGlassRows, FilterPill } from '../components/filter-glass';
 import { LibraryShortcuts } from '../library-shortcuts/shortcut-controls';
-import { RetryNote, useSkeletonReveal } from '../components/grid-reveal';
+import { AsyncText } from '../components/async-text';
+import { RetryNote } from '../components/grid-reveal';
+import { SkeletonContent } from '../components/skeleton-content';
 import { spriteGlyph } from '../components/sprite-glyph';
 import { IconSwap } from '../components/icon-swap';
 import { useViewGlide } from '../components/use-view-glide';
@@ -33,6 +35,7 @@ import { followManageEntry } from '../follow-manage/manage-route';
 import { Note } from '../components/note';
 import { sidebarTagCounts } from '../../sidebar';
 import { queryClient } from '../query';
+import { pageNavigationReady } from '../../history/page-navigation';
 import { FollowAuthorLink, FollowCard } from './follow-card';
 import { authorAvatarHtml, followAuthorEntity, followAuthorName, sourceMark } from './follow-marks';
 import {
@@ -125,6 +128,10 @@ export function FollowFeedPage(props: FollowFeedProps) {
      交回排到微任务里：壳收到后画侧栏，侧栏的句柄内部 `flushSync`，在提交阶段里画不出来。
      这一次的抽屉已被下一次取代或页面已卸下就不交。 */
   const settled = !listPending && !!data;
+  useEffect(() => {
+    void pageNavigationReady(() => location.pathname === '/follow',
+      document.querySelector('#stats [data-filter-frame]'), { pending: listPending });
+  }, [listPending, data, view]);
   const drawer = useMemo<FollowDrawer>(() => ({
     tags: sidebarTagCounts(facets.visible.flatMap(collectionItems).map((item) => ({ tags: item.tags || [] }))),
     providers: [...facets.providers].map(([key, label]) => [key, label, sourceIconUrl(key)] as const),
@@ -185,7 +192,7 @@ export function FollowFeedPage(props: FollowFeedProps) {
         <Combo conditions={conditions} onDrop={(row) => actions.route(dropCondition(view, row))}
           onClear={() => route({ author: '', provider: '', work: '', tags: [], durMin: 0, durMax: 0 })} />
         {facets.broken.length ? <BrokenNote count={facets.broken.length} /> : null}
-        <List key={query.queryKey.join('\u0000')} retryKey={result.dataUpdatedAt} pending={listPending} facets={facets} data={data} context={context}
+        <List retryKey={result.dataUpdatedAt} pending={listPending} facets={facets} data={data} context={context}
           props={props} checkAction={<Button size="small" variant="secondary" aria-label="检查每个来源的更新" aria-busy={job.busy || undefined}
             aria-disabled={job.busy || undefined} onClick={() => { if (!job.busy) void job.start(false) }}>检查更新</Button>} />
         {data.has_more || canBackfill ? (
@@ -466,7 +473,7 @@ function Glass({ facets, view, total, busy, props, route }: {
       </>}
       bottom={<>
         <h3 data-entity-readout="" data-follow-readout="">
-          {`${total.toLocaleString()} 项更新 · 显示 ${facets.visible.length.toLocaleString()}`}
+          <AsyncText text={`${total.toLocaleString()} 项更新 · 显示 ${facets.visible.length.toLocaleString()}`} busy={busy} />
         </h3>
         <LibraryShortcuts currentHref={() => location.pathname + location.search} kind="creator" />
         <span data-entity-sorts="">
@@ -548,13 +555,13 @@ function List({ pending, facets, data, context, props, retryKey, checkAction }: 
 }) {
   const { view, helpers } = props;
   const images = view.media === 'images';
-  const reveal = useSkeletonReveal(pending, () => helpers.listSkeletonHtml(view.media));
   return (
-    <div data-follow-list-body="" data-grid-reveal={reveal.fading ? '' : undefined}>
-      {reveal.layer}
-      {pending ? null : (
+    <div data-follow-list-body="">
+      <SkeletonContent pending={pending} skeletonHtml={() => helpers.listSkeletonHtml(view.media)}>
+        {pending ? null : (
         <Cards facets={facets} data={data} context={context} props={props} images={images} retryKey={retryKey} checkAction={checkAction} />
-      )}
+        )}
+      </SkeletonContent>
     </div>
   );
 }

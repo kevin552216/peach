@@ -1,0 +1,100 @@
+"""Linux DRM fdinfo 的逐进程引擎时间；容器仅读取已映射设备及当前 PID 空间。"""
+from __future__ import annotations
+
+from pathlib import Path
+import re
+import time
+
+
+class LinuxGpuCounters:
+    def __init__(self, *, proc=Path('/proc'), devices=Path('/dev/dri'), clock=time.monotonic):
+        self.proc, self.devices, self.clock = proc, devices, clock
+        self.previous = {}
+        self.cache = {}
+        self.now = None
+
+    def sample(self):
+        self.now = self.clock()
+        self.cache = {}
+        self.previous = {key: value for key, value in self.previous.items() if self.now - value[0] < 60}
+        return None, 'sampling', '等待读取任务的 GPU 进程'
+
+    def _read(self, pid):
+        clients = {}
+        for path in (self.proc / str(pid) / 'fdinfo').iterdir():
+            try:
+                text = path.read_text()
+            except FileNotFoundError:
+                continue
+            fields = dict(line.split(':', 1) for line in text.splitlines() if ':' in line)
+            fields = {key: value.strip() for key, value in fields.items()}
+            if 'drm-driver' not in fields:
+                continue
+            client = fields.get('drm-client-id')
+            if client is None or not client.isdigit():
+                raise ValueError('GPU 驱动未提供可去重的 DRM 客户端编号')
+            device = fields.get('drm-pdev', fields['drm-driver'])
+            engines = {}
+            for key, value in fields.items():
+                if not key.startswith('drm-engine-') or key.startswith('drm-engine-capacity-'):
+                    continue
+                name = key.removeprefix('drm-engine-')
+                match = re.fullmatch(r'(\d+)\s+ns', value)
+                capacity = fields.get(f'drm-engine-capacity-{name}', '1')
+                if match is None or not capacity.isdigit() or int(capacity) <= 0:
+                    raise ValueError('GPU 引擎时间或容量格式无效')
+                engines[f'{device}:{name}'] = (int(match[1]), int(capacity))
+            if not engines:
+                raise ValueError('GPU 驱动未提供 DRM 引擎忙碌时间')
+            clients[(device, client)] = engines
+        return clients
+
+    def _process(self, pid, created):
+        identity = (pid, created)
+        if identity in self.cache:
+            return self.cache[identity]
+        clients = self._read(pid)
+        values, sampling = {}, False
+        for client, engines in clients.items():
+            for engine, (busy, capacity) in engines.items():
+                key = (pid, created, client, engine)
+                old = self.previous.get(key)
+                if old is None:
+                    sampling = True
+                    self.previous[key] = (self.now, busy)
+                    continue
+                elapsed = self.now - old[0]
+                if elapsed <= 0:
+                    sampling = True
+                    continue
+                # DRM 允许短暂回退；保留高水位，避免恢复时重复累计。
+                if busy >= old[1]:
+                    values[engine] = values.get(engine, 0) + 100 * (busy - old[1]) / 1e9 / elapsed / capacity
+                    self.previous[key] = (self.now, busy)
+                else:
+                    values.setdefault(engine, 0.0)
+        result = (values, sampling, set(clients))
+        self.cache[identity] = result
+        return result
+
+    def sample_processes(self, processes):
+        if not self.devices.exists():
+            return None, 'unavailable', '未发现可读取的 DRM GPU 设备；容器需映射设备，驱动需支持逐进程计数'
+        result, clients, sampling = {}, set(), False
+        try:
+            for pid, created in processes.items():
+                values, pending, owned = self._process(pid, created)
+                if clients & owned:
+                    return None, 'unavailable', '多个进程共享 GPU 客户端，使用量无法准确归属'
+                clients.update(owned)
+                sampling |= pending
+                result[pid] = values
+        except (OSError, ValueError) as error:
+            return None, 'unavailable', f'任务 GPU 计数器未取得：{error}'
+        if sampling:
+            return None, 'sampling', '等待下一次 GPU 采样'
+        return result, 'ready', ''
+
+    def close(self):
+        self.previous.clear()
+        self.cache.clear()

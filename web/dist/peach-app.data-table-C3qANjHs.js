@@ -1,7 +1,7 @@
 (function() {
 	try {
 		var e = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {}, t = new e.Error().stack;
-		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "b91d1612-859b-4e23-9bb9-74a868b7d2a0", e._sentryDebugIdIdentifier = "sentry-dbid-b91d1612-859b-4e23-9bb9-74a868b7d2a0");
+		t && (e._sentryDebugIds = e._sentryDebugIds || {}, e._sentryDebugIds[t] = "9e570fe0-9b07-49a2-82da-425ef414d3d6", e._sentryDebugIdIdentifier = "sentry-dbid-9e570fe0-9b07-49a2-82da-425ef414d3d6");
 	} catch {}
 })();
 import { createPaginatedRowModel as e } from "./peach-app.createPaginatedRowModel-ClHnhG_T.js";
@@ -16,8 +16,8 @@ var M = /* @__PURE__ */ y(T(), 1), N = w(), P = k({
 	sortedRowModel: t(),
 	paginatedRowModel: e()
 });
-function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T, onSelected: E, actions: D, title: O = e, titleId: k, description: F, footerActions: I, panel: L = !0, unit: R = "条记录" }) {
-	let [z, B] = (0, M.useState)([]), V = (0, M.useMemo)(() => [{
+function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T, onSelected: E, actions: D, title: O = e, titleId: k, description: F, footerActions: I, toolbarActions: L, panel: R = !0, unit: z = "条记录" }) {
+	let [B, V] = (0, M.useState)([]), H = (0, M.useMemo)(() => [{
 		id: "select",
 		label: "选择",
 		width: 48,
@@ -30,10 +30,10 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 		min: e.min ?? (t === 0 ? 320 : 96),
 		flex: e.flex ?? t === 0,
 		required: t === 0
-	}))], [y]), H = j(`data:${e}`, V), [U, W] = (0, M.useState)({
+	}))], [y]), U = j(`data:${e}`, H), [W, G] = (0, M.useState)({
 		pageIndex: 0,
 		pageSize: 20
-	}), G = n(() => E([])), K = Math.max(1, Math.ceil(t.length / U.pageSize)), q = Math.min(U.pageIndex, K - 1), J = Object.fromEntries(T.map((e) => [e, !0])), Y = (0, M.useMemo)(() => {
+	}), K = n(() => E([])), q = Math.max(1, Math.ceil(t.length / W.pageSize)), J = Math.min(W.pageIndex, q - 1), Y = Object.fromEntries(T.map((e) => [e, !0])), X = (0, M.useMemo)(() => {
 		let t = S();
 		return t.columns([t.display({
 			id: "select",
@@ -61,37 +61,37 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 		y,
 		e,
 		w
-	]), X = A({
+	]), Z = A({
 		features: P,
 		data: t,
-		columns: Y,
+		columns: X,
 		getRowId: x,
 		state: {
-			sorting: z,
-			rowSelection: J,
+			sorting: B,
+			rowSelection: Y,
 			pagination: {
-				...U,
-				pageIndex: q
+				...W,
+				pageIndex: J
 			},
-			columnVisibility: H.visibility
+			columnVisibility: U.visibility
 		},
-		onColumnVisibilityChange: H.change,
+		onColumnVisibilityChange: U.change,
 		onSortingChange: (e) => {
-			B(e), W((e) => ({
+			V(e), G((e) => ({
 				...e,
 				pageIndex: 0
 			}));
 		},
-		onPaginationChange: W,
+		onPaginationChange: G,
 		enableRowSelection: !0,
 		onRowSelectionChange: (e) => {
-			let n = typeof e == "function" ? e(J) : e;
-			Object.values(n).some(Boolean) && G(), E(t.filter((e) => n[x(e)]).map(x));
+			let n = typeof e == "function" ? e(Y) : e;
+			Object.values(n).some(Boolean) && K(), E(t.filter((e) => n[x(e)]).map(x));
 		}
-	}), Z = X.getSelectedRowModel().rows.map((e) => e.original);
+	}), Q = Z.getSelectedRowModel().rows.map((e) => e.original);
 	return /* @__PURE__ */ (0, N.jsxs)("div", {
-		"data-data-table-panel": L || void 0,
-		className: L ? b({
+		"data-data-table-panel": R || void 0,
+		className: R ? b({
 			padding: "none",
 			bordered: "line",
 			className: "flex flex-col gap-4 px-6 py-5 max-sm:px-4"
@@ -109,27 +109,31 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 						children: O
 					}), /* @__PURE__ */ (0, N.jsx)("span", {
 						className: "text-body-2-regular tabular-nums text-text-secondary",
-						children: `${t.length.toLocaleString()} ${R}`
+						children: `${t.length.toLocaleString()} ${z}`
 					})]
 				}), /* @__PURE__ */ (0, N.jsxs)("div", {
 					"data-toolbar-actions": "",
-					children: [/* @__PURE__ */ (0, N.jsx)(g, {
-						preferences: H,
-						label: e
-					}), /* @__PURE__ */ (0, N.jsx)(p, {
-						label: e,
-						options: y.filter((e) => e.value).map((e) => ({
-							id: e.id,
-							label: e.label
-						})),
-						sorting: z,
-						onChange: (e) => {
-							B(e), W((e) => ({
-								...e,
-								pageIndex: 0
-							}));
-						}
-					})]
+					children: [
+						L,
+						/* @__PURE__ */ (0, N.jsx)(g, {
+							preferences: U,
+							label: e
+						}),
+						/* @__PURE__ */ (0, N.jsx)(p, {
+							label: e,
+							options: y.filter((e) => e.value).map((e) => ({
+								id: e.id,
+								label: e.label
+							})),
+							sorting: B,
+							onChange: (e) => {
+								V(e), G((e) => ({
+									...e,
+									pageIndex: 0
+								}));
+							}
+						})
+					]
 				})]
 			}),
 			F ? /* @__PURE__ */ (0, N.jsx)("p", {
@@ -138,9 +142,9 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 			}) : null,
 			/* @__PURE__ */ (0, N.jsxs)(m, {
 				label: `${e}批量操作`,
-				visible: Z.length > 0,
-				count: `已选 ${Z.length.toLocaleString()} ${R}`,
-				children: [D(Z, () => E([])), /* @__PURE__ */ (0, N.jsx)(c, {
+				visible: Q.length > 0,
+				count: `已选 ${Q.length.toLocaleString()} ${z}`,
+				children: [D(Q, () => E([])), /* @__PURE__ */ (0, N.jsx)(c, {
 					variant: "ghost",
 					size: "small",
 					onClick: () => E([]),
@@ -149,21 +153,21 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 			}),
 			/* @__PURE__ */ (0, N.jsx)(f, {
 				follow: !0,
-				preferences: H,
-				onRowClick: (e) => X.getRow(e)?.toggleSelected(),
+				preferences: U,
+				onRowClick: (e) => Z.getRow(e)?.toggleSelected(),
 				children: /* @__PURE__ */ (0, N.jsxs)(h, {
 					"aria-label": e,
 					size: "sm",
-					sortDescriptor: z[0] ? {
-						column: z[0].id,
-						direction: z[0].desc ? "descending" : "ascending"
+					sortDescriptor: B[0] ? {
+						column: B[0].id,
+						direction: B[0].desc ? "descending" : "ascending"
 					} : void 0,
-					onSortChange: (e) => X.getColumn(String(e.column))?.toggleSorting(e.direction === "descending"),
-					children: [/* @__PURE__ */ (0, N.jsxs)(s, { children: [X.getHeaderGroups()[0].headers.map((e) => /* @__PURE__ */ (0, N.jsx)(i, {
+					onSortChange: (e) => Z.getColumn(String(e.column))?.toggleSorting(e.direction === "descending"),
+					children: [/* @__PURE__ */ (0, N.jsxs)(s, { children: [Z.getHeaderGroups()[0].headers.map((e) => /* @__PURE__ */ (0, N.jsx)(i, {
 						id: e.id,
 						isRowHeader: e.id === y[0].id,
 						allowsSorting: e.column.getCanSort(),
-						...H.columnProps(e.id),
+						...U.columnProps(e.id),
 						children: ({ sortDirection: t }) => /* @__PURE__ */ (0, N.jsxs)(N.Fragment, { children: [/* @__PURE__ */ (0, N.jsxs)("span", {
 							className: "flex items-center gap-0.5",
 							children: [C(e.column.columnDef.header, e.getContext()), e.column.getCanSort() ? /* @__PURE__ */ (0, N.jsx)("span", {
@@ -172,18 +176,18 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 								children: /* @__PURE__ */ (0, N.jsx)(u, {})
 							}) : null]
 						}), /* @__PURE__ */ (0, N.jsx)(_, {
-							preferences: H,
+							preferences: U,
 							id: e.id
 						})] })
 					}, e.id)), /* @__PURE__ */ (0, N.jsx)(i, {
 						id: "remaining-space",
 						"aria-label": "行空白区域",
 						"data-table-space": "",
-						width: H.spaceWidth,
+						width: U.spaceWidth,
 						minWidth: 0
 					})] }), /* @__PURE__ */ (0, N.jsx)(r, {
 						renderEmptyState: () => "没有记录",
-						children: X.getRowModel().rows.map((e) => /* @__PURE__ */ (0, N.jsxs)(a, {
+						children: Z.getRowModel().rows.map((e) => /* @__PURE__ */ (0, N.jsxs)(a, {
 							id: e.id,
 							"data-board-selected": e.getIsSelected() || void 0,
 							children: [e.getVisibleCells().map((e) => /* @__PURE__ */ (0, N.jsx)(o, { children: C(e.column.columnDef.cell, e.getContext()) }, e.id)), /* @__PURE__ */ (0, N.jsx)(o, { "data-table-space": "" })]
@@ -195,11 +199,11 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 				label: e,
 				total: t.length,
 				pagination: {
-					...U,
-					pageIndex: q
+					...W,
+					pageIndex: J
 				},
-				onChange: W,
-				unit: R
+				onChange: G,
+				unit: z
 			}),
 			I ? /* @__PURE__ */ (0, N.jsx)("div", {
 				className: "flex flex-wrap items-center justify-end gap-2 border-t border-separator-border pt-4",
@@ -210,4 +214,4 @@ function F({ label: e, items: t, columns: y, rowId: x, rowLabel: w, selected: T,
 }
 export { F as DataTable };
 
-//# debugId=b91d1612-859b-4e23-9bb9-74a868b7d2a0
+//# debugId=9e570fe0-9b07-49a2-82da-425ef414d3d6

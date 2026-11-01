@@ -19,7 +19,7 @@ export function SourceSettings({ data, receipt, panel, issues }: ConfigurationGr
     queryFn: ({ signal }) => fetchCredentials(signal), enabled: panel?.active !== false, refetchOnMount: 'always' });
   return <div {...groupRoot(panel)}>
     {issues}
-    <div><ButtonLink href="/sources" variant="secondary">采集来源与登录状态</ButtonLink></div>
+    <div data-guide-target="sources"><ButtonLink href="/sources" variant="secondary">采集来源与登录状态</ButtonLink></div>
     {credentials.data
       ? <Credentials data={credentials.data} readOnly={Boolean(data.ledger_read_only)} toast={receipt} embedded />
       : credentials.error

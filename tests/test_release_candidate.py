@@ -176,7 +176,9 @@ class DockerPublicationTests(unittest.TestCase):
                        "candidate": {"identity": {"pipeline": "7"}, "docker": {"image_id": image["Id"]}}}
             (root / "build/ci-artifacts/release-candidate.json").write_text(json.dumps(receipt))
             driver = root / "driver.ps1"
-            driver.write_text('''function docker {
+            # 重定向时 pwsh 按系统代码页输出，中文 Windows 上失败消息是 GBK；按 UTF-8 读要先切换。
+            driver.write_text('''[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+function docker {
     param([Parameter(Position=0, ValueFromRemainingArguments=$true)][string[]]$DockerArgs,
           [Parameter(ValueFromPipeline=$true)][string]$LoginInput)
     Add-Content -LiteralPath calls.log -Value ($DockerArgs -join ' ')

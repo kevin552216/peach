@@ -1249,6 +1249,7 @@ dependencies = [
     { name = "m3u8" },
     { name = "pillow" },
     { name = "protobuf" },
+    { name = "psutil" },
     { name = "pyahocorasick" },
     { name = "pydantic" },
     { name = "pystray" },
@@ -1273,7 +1274,6 @@ build = [
 dev = [
     { name = "filelock" },
     { name = "httpx2" },
-    { name = "psutil" },
     { name = "ruff" },
     { name = "seiso" },
 ]
@@ -1314,7 +1314,7 @@ requires-dist = [
     { name = "p115client", marker = "extra == 'maintenance-115'", specifier = "==0.0.9.7.2" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "protobuf", specifier = "==7.36.2" },
-    { name = "psutil", marker = "extra == 'dev'", specifier = "==7.2.2" },
+    { name = "psutil", specifier = "==7.2.2" },
     { name = "pyahocorasick", specifier = "==2.3.1" },
     { name = "pydantic", specifier = "==2.14.2" },
     { name = "pyinstaller", marker = "extra == 'build'", specifier = "==6.22.3" },

@@ -13,7 +13,9 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from .catalog_rules import is_jav_code, normalise_code_key, release_code_from_product, same_release_code
+from .catalog_rules import (
+    is_jav_code, normalise_code_key, release_code_from_product, same_release_code, without_store_prefix,
+)
 from .config import PROJECT_ROOT
 from .downloads import (
     CLOUDDRIVE_CREDENTIAL, INGESTED, POSTPROCESS_LABELS, REMOTE_RUNNING, RESUBMITTABLE_STATES,
@@ -75,7 +77,8 @@ def code_key(value: object) -> str:
     code = release_code_from_product(raw) if len(raw) <= 80 else None
     if not code or not is_jav_code(code) or normalise_code_key(raw) != normalise_code_key(code):
         raise ValueError("请提供一个明确的 JAV 番号")
-    return normalise_code_key(code)
+    # 店铺商品号（`107STZY-019`）在账本与资源站都是裸番号，查询、搜索与入库统一用它。
+    return without_store_prefix(code)
 
 
 def source_page(value: object) -> str:
@@ -158,12 +161,17 @@ class JavBrowser:
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict) or len(payload) > 200:
             raise ValueError("浏览器添加队列无法读取")
+        rows = {}
         for key, row in payload.items():
-            if not isinstance(row, dict) or code_key(key) != key or row.get("state") not in MESSAGES:
+            if not isinstance(row, dict) or normalise_code_key(key) != key or row.get("state") not in MESSAGES:
                 raise ValueError("浏览器添加队列无法读取")
             if row["state"] == "searching":
                 row["state"] = "queued"
-        return payload
+            # 店铺前缀归一之前记下的行（`107STZY-019`）改记到裸番号下，裸番号已有记录时以它为准。
+            canonical = code_key(key)
+            if canonical == key or canonical not in rows:
+                rows[canonical] = row
+        return rows
 
     def _save(self):
         atomic_write_text(self.path, json.dumps(self.rows, ensure_ascii=False, indent=2) + "\n")

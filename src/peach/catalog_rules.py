@@ -289,6 +289,10 @@ _DATED_COMPACT = re.compile(rf"^{_MMDDYY}\d{{2,4}}$")
 _CODE_MAKER_PREFIXED = re.compile(r"^(\d{3})([A-Z]{2,8})-(\d{2,5})$")
 #: 数字前缀单独保留；`h_` 是 DMM content_id 的 label 标记。
 _RELEASE_ID = re.compile(r"^(\d{1,4})?([A-Z]{2,8})0*(\d{1,5})([A-Z]{0,2})$")
+#: MGStage 给 SOD 作品加的店铺前缀：商品页 `107STARS-325` 与 DMM、javdb 的 `STARS-325` 是同一部，
+#: 账本与资源站都只用裸番号。2026-11-01 逐组核过 MGStage 商品页与 javdb 的标题、出演、日期，
+#: 账本里这三个字母段只挂 SOD Create。
+_STORE_PREFIXES = {("107", "STARS"), ("107", "START"), ("107", "STZY")}
 # 仅登记已核验的写法关系；查询扩展表不是身份等价表。
 #
 # MGStage 前缀那 9 行 2026-09-25 逐组核过：MGStage 商品页与 r18dev 快照的标题、时长、
@@ -297,7 +301,7 @@ _RELEASE_ID = re.compile(r"^(\d{1,4})?([A-Z]{2,8})0*(\d{1,5})([A-Z]{0,2})$")
 _RELEASE_PREFIX_ALIASES = {
     ("259", "LUXU"), ("7", "BAZX"), ("49", "HA"),
     ("230", "ORETD"), ("278", "GYAN"), ("336", "KBI"), ("345", "SIMM"), ("413", "INST"),
-    ("428", "SUKE"), ("435", "MFC"), ("476", "MLA"), ("762", "FKOS"),
+    ("428", "SUKE"), ("435", "MFC"), ("476", "MLA"), ("762", "FKOS"), *_STORE_PREFIXES,
 }
 _DMM_LABEL_PREFIX = re.compile(r"^H_(?=\d)")
 _MEDIA_EXTENSION = re.compile(
@@ -666,6 +670,15 @@ def code_query_variants(code: str | None) -> tuple[str, ...]:
         if prefix:
             return (primary, f"{prefix}{primary}")
     return (primary,)
+
+
+def without_store_prefix(code: str | None) -> str:
+    """去掉发行平台的店铺前缀，得到账本与资源站使用的写法：`107STZY-019` → `STZY-019`。"""
+    primary = normalise_code_key(code)
+    prefixed = _CODE_MAKER_PREFIXED.fullmatch(primary)
+    if prefixed and prefixed.group(1, 2) in _STORE_PREFIXES:
+        return f"{prefixed.group(2)}-{prefixed.group(3)}"
+    return primary
 
 
 def release_identity(code: str | None) -> str:

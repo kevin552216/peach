@@ -164,12 +164,12 @@ compositionState.shellActions = {
     open:(path,{entering=false,retitle=false}={})=>{
       if(retitle){syncRouteChrome();syncHeaderActions();paintListTitle()}
       if(entering)dropBars();
-      if(path==='/trash'){catalogState.clearSearchField();showHomeSurfaces()}
+      if(path==='/trash'){catalogState.clearSearchField()}
       else{$('#q').value=state.q;catalogState.rememberSearchValue()}
-      syncNavigation();buildBars();preferencesState.handOff(loadCatalog());
+      syncNavigation();buildBars();return preferencesState.handOff(loadCatalog());
     },
     /* 壳认领写了地址、筛选已在 `state` 里：只重取。 */
-    load:()=>{preferencesState.handOff(loadCatalog())},
+    load:()=>preferencesState.handOff(loadCatalog()),
     /* 没有背景的作品与队列地址（深链、刷新）：详情下面那份列表一次请求都没发过，补发一次，不留一张写着在读、
        其实没有请求在跑的骨架。走 `paintCatalogGrid` 直接挂网格：`loadCatalog` 开头就 `disposeStage()`，会把这一屏
        详情一起收掉。网格已经画上（哪怕还在取第一页）就不再补发；不是启动那一条时只接着那张骨架。 */

@@ -57,7 +57,7 @@ function IndexerForm({ initial, receipt }: { initial: State; receipt(message: st
     });
   };
   return (
-    <Section title="资源搜索" onSubmit={save}>
+    <Section guide="indexers" title="资源搜索" onSubmit={save}>
       <Stack>
         <div className="flex min-w-0 flex-col gap-4">
         <Disclosure summary="索引器连接帮助"><Help>填写 Prowlarr 或 Jackett 提供的 Torznab 地址和 API key。{' '}

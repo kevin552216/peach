@@ -263,7 +263,7 @@ describe('设计决定：配置控件', () => {
       } finally { await opened.close(); }
     });
 
-    it(`媒体状态居中，辅助动作与保存有层级，安装教程是单行（${viewport.name}）`, { timeout: 60_000 }, async () => {
+    it(`媒体状态居中，辅助动作与保存有层级，新手教程入口可见（${viewport.name}）`, { timeout: 60_000 }, async () => {
       const opened = await visit(browser, '/settings/library', viewport);
       try {
         const page = opened.page;
@@ -289,10 +289,10 @@ describe('设计决定：配置控件', () => {
         assert.notEqual(await media.getByRole('button', { name: '添加媒体库', exact: true }).evaluate((node) => getComputedStyle(node).backgroundImage),
           await media.getByRole('button', { name: '保存配置', exact: true }).evaluate((node) => getComputedStyle(node).backgroundImage));
         await page.getByRole('tab', { name: '应用与维护', exact: true }).click();
-        const tutorial = page.getByRole('region', { name: '安装教程', exact: true });
+        const tutorial = page.getByRole('region', { name: '新手教程', exact: true });
         await tutorial.waitFor();
         const aligned = await tutorial.evaluate((node) => {
-          const label = [...node.querySelectorAll('p')].find((item) => item.textContent === '安装教程')!.getBoundingClientRect();
+          const label = [...node.querySelectorAll('p')].find((item) => item.textContent === '新手教程')!.parentElement!.getBoundingClientRect();
           const button = node.querySelector('button')!.getBoundingClientRect();
           return { delta: Math.abs(label.top + label.height / 2 - button.top - button.height / 2), gap: button.left - label.right };
         });

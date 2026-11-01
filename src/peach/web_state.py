@@ -370,6 +370,9 @@ class WebContract:
         self.media_repair_job.stop()
         self.duplicate_hash_job.stop()
         self.amane_bridge_job.stop()
+        self.face_models_job.stop()
+        if hasattr(self, 'task_resource_monitor'):
+            self.task_resource_monitor.close()
         if hasattr(self, "jav_discovery_metadata"):
             self.jav_discovery_metadata.stop()
         self.followups.stop()

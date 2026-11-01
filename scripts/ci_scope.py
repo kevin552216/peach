@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "src"))
 _SHARED = (
     "test_platform", "test_fsutil", "test_folder_picker", "test_certs", "test_auth", "test_onboarding",
     "test_media", "test_media_probe", "test_frame_capture",
+    "test_data_storage", "test_task_resources", "test_resource_platform",
     "frontend/e2e/setup.test.ts", "frontend/e2e/playback-resume.test.ts",
     "frontend/e2e/player-v10.test.ts", "frontend/e2e/http-configuration.test.ts",
 )
@@ -35,7 +36,7 @@ PLATFORM_TESTS: dict[str, tuple[str, ...]] = {
                 "test_tray", "test_tray_detached", "test_tray_diagnostics", "test_tray_lifecycle",
                 "test_restart_windows_tray", "test_process_job", "test_windows_update",
                 "test_desktop_settings", "test_desktop_installer", "test_standalone_update",
-                "test_data_storage", "test_interaction", "test_jobs", "test_scan", "test_media_tool_import",
+                "test_interaction", "test_jobs", "test_scan", "test_media_tool_import",
                 "frontend/e2e/external-playback.test.ts"),
     "macos": (*_SHARED,
               "test_tray", "test_mount", "test_netwatch", "test_mdns", "test_macos_standalone", "test_macos_media",

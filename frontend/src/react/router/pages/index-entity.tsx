@@ -18,6 +18,7 @@
  * 做会出 flushSync 告警。壳订阅历史早于路由根，它写标题与侧栏的那一轮排在前面。 */
 import { useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
+import { pageNavigationReady, rememberPageState, restoredPageState, restoringPage } from '../../../history/page-navigation';
 
 import { appSettingsStore } from '@peach/appearance';
 import { isOverlayPath, managedEntry, openManagedRoute, peachHistory, shellNavigate, updateManagedRoute } from '@peach/history';
@@ -94,15 +95,24 @@ async function openIndex(actions: ShellActions, kind: IndexPageKind, search: str
   const host = indexHost();
   if (!host) return;
   const path = `/${kind}` as const;
-  actions.surfaceChanged('index', path);
   const params = indexParams(kind, search);
   const layout = peopleLayoutOf(appSettingsStore().value.peopleLayout);
-  paintIndexSkeleton(host, params, layout);
+  const reuse = !!host.querySelector('[data-index-page]') && !host.hidden;
+  if (!reuse) {
+    actions.surfaceChanged('index', path);
+    paintIndexSkeleton(host, params, layout);
+    void pageNavigationReady(live, host, { pending: true });
+  }
   /* 页内换档、存版式、退出选择、头像与去处都在 `ShellActions` 里，跟着打开走的只有地址上那四项与此刻的版式、
      选择键和配置权限。 */
   const painted = await openManagedRoute(path,
-    { ...params, layout, selectMode, configurable: !!actions.configurable?.() }, { container: host, isCurrent: live });
-  if (painted && live()) actions.surfaceShown?.('index', path);
+    { ...params, layout, selectMode, configurable: !!actions.configurable?.() }, {
+      container: host, isCurrent: live, reuse,
+    });
+  if (painted && live()) {
+    actions.surfaceShown?.('index', path);
+    void pageNavigationReady(live, host);
+  }
 }
 
 /* `#index` 里画着、露着的是这一页索引。 */
@@ -176,8 +186,6 @@ async function openEntity(
   const host = indexHost();
   if (!host) return;
   const { segment, kind, name } = target;
-  actions.surfaceChanged('entity', pathname);
-  await shell.loading(kind, name, live);
   if (!live()) return;
   writeShell({ entityJavLayout: false });
   /* 卡外面依次是交集条与玻璃浮层、新作和正文，顶到底一条线。四块宿主先在文档外排好，首屏取齐那一刻才换掉骨架
@@ -195,19 +203,21 @@ async function openEntity(
     feed: frame.content.querySelector<HTMLElement>('[data-feed-new]')!,
     body: frame.content.querySelector('[data-entity-body]>.peach-react')!,
   };
-  const open = shell.props(kind, name, search);
+  const open = { ...shell.props(kind, name, search), ...restoredPageState<Pick<EntityPageProps, 'seed' | 'revision' | 'jav'>>('entity') };
+  rememberPageState('entity', { seed: open.seed, revision: open.revision, jav: open.jav });
   /* 这一页是不是 JAV 语境由页面按第一页作品推出来，写回壳的状态：壳的排序项、侧栏取数与卡片版式都读它。 */
   const props: EntityPageProps = {
-    ...open, hosts, card: entityCard(actions), resolvedEntity,
+    ...open, hosts, card: entityCard(actions), resolvedEntity, restoreNavigation: restoringPage(),
     actions: { ...open.actions, javContext: (on) => { writeShell({ entityJavLayout: !!on }) } },
   };
   const painted = await openManagedRoute(`/${segment}/*` as EntityRoutePath, props, {
     container: host, isCurrent: live,
+    beforePlace: () => actions.surfaceChanged('entity', pathname),
     place: (container) => { container.replaceChildren(...parts); return hero.firstElementChild as HTMLElement },
   });
   if (!painted || !live() || !entityShown()) return;
   actions.surfaceShown?.('entity', pathname);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  void pageNavigationReady(live, hosts.filter);
 }
 
 function EntityOpen({ target }: { target: { segment: string; kind: string; name: string } }) {
@@ -218,10 +228,16 @@ function EntityOpen({ target }: { target: { segment: string; kind: string; name:
     const shell = actions?.entity;
     if (!actions || !shell) return;
     void (async () => {
+      if (fresh || !entityShown()) {
+        actions.surfaceChanged('entity', location.pathname);
+        await shell.loading(target.kind, target.name, live);
+        if (!live()) return;
+        void pageNavigationReady(live, indexHost(), { pending: true });
+      }
       const params = new URLSearchParams({ kind: target.kind });
       params.set(/^[0-9]+$/.test(target.name) ? 'id' : 'name', target.name);
       const entity = await queryClient.fetchQuery({ queryKey: ['entity-route', target.kind, target.name],
-        queryFn: ({ signal }) => apiGet<EntityPageData>(`/api/entity?${params}`, signal), staleTime: 0 })
+        queryFn: ({ signal }) => apiGet<EntityPageData>(`/api/entity?${params}`, signal), staleTime: restoringPage() ? Infinity : 0 })
         .catch(() => null);
       if (!live()) return;
       if (entity?.redirect) {
@@ -229,14 +245,21 @@ function EntityOpen({ target }: { target: { segment: string; kind: string; name:
           { replace: true, state: peachHistory.navigation.location.state });
         return;
       }
-      if (!entity?.id || entity.error) { shell.missing(target.kind); return }
+      if (!entity?.id || entity.error) {
+        shell.missing(target.kind);
+        void pageNavigationReady(live);
+        return;
+      }
       const name = String(entity.canonical_name || target.name);
       const path = entityPath(target.kind, name, Number(entity.id));
       if (path !== location.pathname) {
         shellNavigate(path + location.search + location.hash, { replace: true, state: peachHistory.navigation.location.state });
         return;
       }
-      if (!fresh && shell.refresh(target.kind, name, location.search)) return;
+      if (!fresh && shell.refresh(target.kind, name, location.search)) {
+        void pageNavigationReady(live, indexHost()?.querySelector('[data-entity-filter]'));
+        return;
+      }
       void openEntity(actions, shell, { ...target, name }, location.pathname, location.search, live, entity);
     })();
   }, { shown: () => entityShown() && !indexHost()?.hidden });

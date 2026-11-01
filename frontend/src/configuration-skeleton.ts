@@ -10,6 +10,7 @@ import { esc } from '@peach/legacy/core';
 import { islandButton, islandGlyph, islandSelect } from './island-skeleton';
 import { CONFIGURATION_SECTIONS } from './history/settings-route';
 import { diagnosticsSkeleton } from './diagnostics-skeleton';
+import { sectionGuide } from './onboarding/guide-catalog';
 import { LIBRARY_FOLDER_HELP, POLICY_SUMMARY } from './react/settings/library-policy-copy';
 import { ENTRY_LINKS_HELP, ENTRY_LINKS_HINT } from './configuration-copy';
 import CREDENTIAL_REGISTRY from './react/follow-manage/credential-providers.json' with { type: 'json' };
@@ -83,7 +84,7 @@ const heading = (name: string, aside: string, mark: boolean) => {
   return aside ? `<div class="flex w-full flex-wrap items-center justify-between gap-2"><div class="min-w-40 flex-1">${label}</div><div class="flex min-w-0 max-w-full">${aside}</div></div>` : label;
 };
 const section = (name: string, content: string, actions = '', { aside = '', status = '', mark = false } = {}) =>
-  `<section aria-label="${name}" class="flex w-full flex-col gap-2 wrap-anywhere">${heading(name, aside, mark)}<div class="flex w-full flex-col rounded-2xl bg-background-secondary-default pl-3">${content}${actions ? footer(actions, status) : ''}</div></section>`;
+  `<section aria-label="${name}" class="flex w-full flex-col gap-2 wrap-anywhere">${heading(name, aside, mark)}${sectionGuide(name) ? `<div aria-hidden="true" class="flex items-center gap-1 text-body-2-medium text-text-secondary">${islandGlyph('chevron-right', 'size-(--icon-inline) shrink-0')}设置说明</div>` : ''}<div class="flex w-full flex-col rounded-2xl bg-background-secondary-default pl-3">${content}${actions ? footer(actions, status) : ''}</div></section>`;
 const controlRow = (label: string, description: string, control: string) => `<div class="flex min-h-[52px] w-full items-center justify-between gap-4 py-2.5 pr-2.5 border-b border-separator-border last:border-b-0"><div class="flex min-w-0 flex-col"><p class="text-body-regular text-text-primary">${label}</p>${description ? `<p class="text-body-2-regular text-text-secondary">${description}</p>` : ''}</div>${control}</div>`;
 const row = (label: string, description = '', control = 'ui-configuration-skeleton-toggle') => controlRow(label, description, `<span class="skeleton ${control}"></span>`);
 /* 只读一句读数的行（「每 3 个月」）：右边是一段文字宽的占位，行高同开关行。 */
@@ -337,7 +338,7 @@ const maintenance = () => {
     button('更改位置', 'secondary') + button(storageRows ? '重新统计' : '统计占用'))
     + (reporting || sharing ? section('数据上传', reporting + sharing) : '')
     + section('运行信息', facts(runtime.length ? runtime : RUNTIME_FACTS))
-    + `<section aria-label="安装教程" class="w-full"><div class="flex w-full flex-col rounded-2xl bg-background-secondary-default pl-3">${controlRow('安装教程', '', button('重新打开教程', 'secondary'))}</div></section>`
+    + `<section aria-label="新手教程" class="w-full"><div class="flex w-full flex-col rounded-2xl bg-background-secondary-default pl-3">${controlRow('新手教程', '在所有设备上恢复右上角教程入口，保留已读进度', button('重新打开', 'secondary'))}</div></section>`
     + (given(shape?.uninstall) ? section('卸载 Peach', (on(shape?.uninstallHelp) ? stack(help('卸载移除 Peach 程序本身，原始媒体文件保留。')) : '')
       + row('完全卸载', '同时删除设置、本地数据库、观看记录、凭据和缓存') + stack(summary('数据目录'), true), button('卸载 Peach'), { status: text('16em') }) : '');
 };

@@ -41,14 +41,14 @@ def source_number(value):
 
 
 class DiscoveryMetadata:
-    """缓存只承载来源资料；后台任务不写账本或 task_run。"""
+    """缓存只承载来源资料；任务进度与控制沿用任务中心。"""
 
-    def __init__(self, path: Path, *, api=PUBLIC_API, clock=time.time):
+    def __init__(self, path: Path, *, api=PUBLIC_API, clock=time.time, runs=None):
         path = Path(path)
         self.path = path.with_name(f'{path.stem}.javdb-{RULE}{path.suffix}')
         self.api, self.clock = api, clock
         self.lock = threading.RLock()
-        self.job = BackgroundJob("jav-discovery-metadata")
+        self.job = BackgroundJob('jav-discovery-metadata', runs=runs)
         self.last_job = None
         self.records = OrderedDict()
         self._load()
@@ -59,7 +59,7 @@ class DiscoveryMetadata:
             saved = {}
         if saved.get('javdb_rule') != RULE:
             saved = {}
-        if saved.get('status') == 'running':
+        if saved.get('status') == 'running' and runs is None:
             self.ensure(saved.get('codes') or [], _resume=saved)
         elif saved.get('job_id'):
             self.last_job = saved
@@ -172,7 +172,8 @@ class DiscoveryMetadata:
         from .job_recovery import current_job_id
         token = current_job_id.set(_resume.get('job_id')) if _resume else None
         try:
-            result = self.job.start(work, initial=initial, restart=bool(snapshot))
+            result = self.job.start(work, initial=initial, restart=bool(snapshot),
+                                    recovery={'codes': codes, 'refresh': refresh})
             self._save_job()
             return result
         finally:
@@ -181,6 +182,10 @@ class DiscoveryMetadata:
 
     def _run_batch(self, current_id, *, initial, pending, refresh, budget, previous_elapsed, started,
                    successful, attempted, failures):
+        from .task_control import CURRENT
+        control = CURRENT.get()
+        def elapsed():
+            return previous_elapsed + time.monotonic() - started - (control.paused_seconds if control is not None else 0.0)
         completed = initial['completed']
         stop_reason = ""
         with public_cache_scope(self.path.parent / 'jav-public'), self.api.request_budget(budget):
@@ -205,9 +210,9 @@ class DiscoveryMetadata:
                 if code not in attempted:
                     completed += 1
                     attempted.add(code)
-                if not self.job.update(current_id, completed=completed, failed=len(failures),
+                if not self.job.checkpoint(current_id, completed=completed, failed=len(failures),
                         completed_codes=sorted(successful), attempted_codes=sorted(attempted), failed_codes=sorted(failures),
-                        active_seconds=previous_elapsed + time.monotonic() - started,
+                        active_seconds=elapsed(),
                         requests=budget.requests, bytes=budget.bytes, batch=(completed + 9) // 10):
                     return
                 self._save_job()
@@ -215,7 +220,7 @@ class DiscoveryMetadata:
                     break
         self.job.update(current_id, status="stopped" if stop_reason else "complete", stop_reason=stop_reason,
                         completed=completed, failed=len(failures), requests=budget.requests, bytes=budget.bytes,
-                        active_seconds=previous_elapsed + time.monotonic() - started)
+                        active_seconds=elapsed())
         self._save_job()
 
     def stop(self):
@@ -226,8 +231,10 @@ class DiscoveryMetadata:
         snapshot = self.job.snapshot() or self.last_job
         if not snapshot or (job_id and snapshot["job_id"] != job_id):
             return snapshot
-        self.job.stop()
-        snapshot.update(status="stopped", stop_reason="cancelled")
+        self.job.stop(resume=False)
+        live = self.job.snapshot() or snapshot
+        snapshot.update(status='cancelled' if live.get('status') == 'cancelled' else 'cancelling',
+                        stop_reason='cancelled')
         self.last_job = snapshot
         with self.lock:
             atomic_write_text(self.job_path, json.dumps(snapshot, ensure_ascii=False))
@@ -237,5 +244,6 @@ class DiscoveryMetadata:
 def discovery_metadata(contract):
     with contract.cache_lock:
         if not hasattr(contract, "jav_discovery_metadata"):
-            contract.jav_discovery_metadata = DiscoveryMetadata(contract.cover_root.parent / "jav-discovery-metadata.json")
+            contract.jav_discovery_metadata = DiscoveryMetadata(
+                contract.cover_root.parent / 'jav-discovery-metadata.json', runs=contract.task_runs)
         return contract.jav_discovery_metadata

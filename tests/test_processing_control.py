@@ -2,6 +2,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
@@ -17,6 +18,16 @@ from support.ledger import fresh_ledger
 
 
 class ProcessingControlTests(unittest.TestCase):
+    def assert_processing_status(self, contract, expected):
+        from peach.web_library_processing import q_library_processing
+        deadline = time.monotonic() + 5
+        while True:
+            state = q_library_processing(contract, {})
+            if state['status'] == expected or time.monotonic() >= deadline:
+                self.assertEqual(state['status'], expected)
+                return state
+            threading.Event().wait(.01)
+
     def test_failed_worker_keeps_retries_out_until_its_real_lock_is_released(self):
         from filelock import FileLock, Timeout
         from peach.jobs import BackgroundJob
@@ -456,9 +467,12 @@ class ProcessingControlTests(unittest.TestCase):
         root.mkdir(parents=True)
         db = fresh_ledger(root)
         job = BackgroundJob('library-processing', runs=TaskRunStore(db))
+        self.addCleanup(job.stop, timeout=None)
         contract = SimpleNamespace(db_path=db, library_processing_job=job, database=job.runs.database,
+            task_runs=job.runs,
             candidate_root=self.root/'candidates', cover_root=self.root/'covers', cache_bust=lambda:None)
         entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
         def process(*_args, **kwargs):
             identity = kwargs['job_id']
             with control_for(self.config).bind(identity, publish=lambda **v:kwargs['report'](v),
@@ -498,18 +512,18 @@ class ProcessingControlTests(unittest.TestCase):
         database_root.mkdir(parents=True)
         db = fresh_ledger(database_root)
         job = BackgroundJob('library-processing', runs=TaskRunStore(LedgerDatabase(db)))
+        self.addCleanup(job.stop, timeout=None)
         contract = SimpleNamespace(db_path=db, library_processing_job=job,
+                                   task_runs=job.runs,
                                    candidate_root=self.root / 'candidates', cover_root=self.root / 'covers',
                                    database=job.runs.database, cache_bust=lambda: None)
-        entered, advance, paused, done = (threading.Event() for _ in range(4))
+        entered, advance, done = (threading.Event() for _ in range(3))
         calls, errors = [], []
         def process(*_args, **kwargs):
             identity = kwargs['job_id']
             calls.append(identity)
             def report(**values):
                 kwargs['report'](values)
-                if values.get('status') == 'paused':
-                    paused.set()
             try:
                 with control_for(self.config).bind(identity, publish=report, active=lambda: True, db_path=db):
                     _save(state_path(self.config), dict(job_id=identity, status='running', requested_stage='metadata'))
@@ -532,7 +546,7 @@ class ProcessingControlTests(unittest.TestCase):
             reply = w_library_processing(contract, {'action': 'pause', 'job_id': identity})
             self.assertEqual(reply['status'], 'pausing')
             advance.set()
-            self.assertTrue(paused.wait(2))
+            self.assert_processing_status(contract, 'paused')
             self.assertEqual(q_library_processing(contract, {})['status'], 'paused')
             self.assertFalse(done.is_set())
             w_library_processing(contract, {'action': 'resume', 'job_id': identity})
@@ -565,10 +579,12 @@ class ProcessingControlTests(unittest.TestCase):
         db = fresh_ledger(database_root)
         runs = TaskRunStore(LedgerDatabase(db))
         first = BackgroundJob('library-processing', runs=runs)
+        self.addCleanup(first.stop, timeout=None)
         contract = SimpleNamespace(db_path=db, library_processing_job=first,
+                                   task_runs=runs,
                                    candidate_root=self.root / 'candidates', cover_root=self.root / 'covers',
                                    database=runs.database, cache_bust=lambda: None)
-        entered, advance, paused = (threading.Event() for _ in range(3))
+        entered, advance = (threading.Event() for _ in range(2))
         identities, resumes = [], []
         def process(*_args, **kwargs):
             identity = kwargs['job_id']
@@ -580,14 +596,18 @@ class ProcessingControlTests(unittest.TestCase):
                 state.update(values)
                 _save(state_path(self.config), state)
                 kwargs['report'](dict(state))
-                if state['status'] == 'paused':
-                    paused.set()
             with control_for(self.config).bind(identity, publish=report, active=kwargs['active'], db_path=db):
                 _save(state_path(self.config), state)
                 if len(identities) == 1:
                     entered.set()
                     advance.wait(2)
-                checkpoint()
+                try:
+                    checkpoint()
+                except Exception:
+                    from peach.processing_control import interrupted_state
+                    state.update(interrupted_state(control_for(self.config)))
+                    _save(state_path(self.config), state)
+                    raise
                 return {'status': 'complete'}
         with patch('peach.web_library_processing.settings_file.active', return_value=self.config), \
                 patch('peach.web_library_processing.process_library', side_effect=process):
@@ -595,11 +615,12 @@ class ProcessingControlTests(unittest.TestCase):
             self.assertTrue(entered.wait(2))
             w_library_processing(contract, {'action': 'pause', 'job_id': initial['job_id']})
             advance.set()
-            self.assertTrue(paused.wait(2))
+            self.assert_processing_status(contract, 'paused')
             first.stop()
             self.assertEqual(runs.get(initial['run_id']).status, 'pending')
             self.assertEqual(runs.get(initial['run_id']).progress_label, '已暂停，等待继续')
             second = BackgroundJob('library-processing', runs=runs)
+            self.addCleanup(second.stop, timeout=None)
             contract.library_processing_job = second
             w_library_processing(contract, {'action': 'resume', 'job_id': initial['job_id']})
             second.thread.join(2)

@@ -1522,6 +1522,7 @@ class WebDataTests(unittest.TestCase):
             "/api/suggest",
             "/api/search-history", "/api/review", "/api/playlists", "/api/playlist",
             "/api/post-setup-tutorial",
+            "/api/tutorial-progress", "/api/performer/delete-candidates", "/api/performer/delete-plan",
             "/api/library-shortcuts", "/api/folders",
             "/api/custom-metadata",
             "/api/follow", "/api/follow/credentials", "/api/follow/schedule",
@@ -1546,6 +1547,7 @@ class WebDataTests(unittest.TestCase):
             "/api/scraping/amane-bridge/check", "/api/scraping/amane-bridge/rebuild",
             "/api/activity", "/api/play", "/api/feedback", "/api/watch-later",
             "/api/playlist",
+            "/api/tutorial-progress", "/api/performer/delete",
             "/api/library-shortcuts", "/api/folders/preview", "/api/folders/rule",
             "/api/custom-metadata",
             "/api/preference", "/api/quality-goal", "/api/item-tag", "/api/batch",
@@ -3440,27 +3442,6 @@ class DuplicateDetectionTests(unittest.TestCase):
         self.assertTrue(all(row['path'] for row in group['files']))
         self.assertEqual(next(row['id'] for row in group['files'] if row['is_largest']), second)
         self.assertEqual(next(row['id'] for row in group['files'] if row['is_longest']), second)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def test_part_marker_extraction(self):
         self.assertEqual(rm_web.part_marker("HRV-041-1.mp4"), "1")

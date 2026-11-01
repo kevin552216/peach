@@ -139,12 +139,16 @@ class PublicRequestBudget:
     bytes: int = 0
     started: float = 0
     stop_reason: str = ""
+    paused_at_start: float = 0.0
 
     def check(self):
+        from .task_control import CURRENT
+        control = CURRENT.get()
+        paused = control.paused_seconds - self.paused_at_start if control is not None else 0.0
         for reason, exhausted in (
                 ("request_budget", self.requests >= self.max_requests),
                 ("byte_budget", self.bytes >= self.max_bytes),
-                ("time_budget", time.monotonic() - self.started >= self.max_seconds)):
+                ("time_budget", time.monotonic() - self.started - paused >= self.max_seconds)):
             if exhausted:
                 self.stop_reason = reason
                 raise PublicBudgetExceeded("本轮作品资料预算已用完")
@@ -183,6 +187,9 @@ class PublicAPI:
     @contextmanager
     def request_budget(self, budget: PublicRequestBudget):
         budget.started = time.monotonic()
+        from .task_control import CURRENT
+        control = CURRENT.get()
+        budget.paused_at_start = control.paused_seconds if control is not None else 0.0
         token = self.request_context.set(budget)
         try:
             yield budget

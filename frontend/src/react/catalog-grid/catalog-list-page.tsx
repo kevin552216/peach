@@ -199,6 +199,7 @@ export function CatalogListPage(props: CatalogGridProps) {
             </TableCell>)}
             <TableCell data-table-space="" />
           </TableRow>) : table.getRowModel().rows.map(row => <TableRow key={row.id} id={row.id} data-catalog-row="" data-id={row.original.id}
+            data-guide-video={(!row.original.medium || row.original.medium === 'video') && row.original.location !== 'online' && !String(row.original.name || '').toLowerCase().endsWith('.iso') ? '' : undefined}
             data-library={tints.get(row.original.library_id || '')?.color ? row.original.library_id : undefined}
             data-board-selected={row.getIsSelected() || undefined}>
             {row.getVisibleCells().map(cell => <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>)}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,6 +67,13 @@ class LedgerDatabase:
         等不到抛 `sqlite3.OperationalError`，与 SQLite 自己等超时是同一种异常。不传则
         进程内一直排队、SQLite 等 30 秒。
         """
+        from .task_control import operation
+        with operation() if notify else nullcontext():
+            with self._write_transaction(notify=notify, timeout=timeout) as connection:
+                yield connection
+
+    @contextmanager
+    def _write_transaction(self, *, notify: bool, timeout: float | None):
         if not self.write_lock.acquire(timeout=-1 if timeout is None else timeout):
             raise sqlite3.OperationalError("database is locked")
         try:

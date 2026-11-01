@@ -51,6 +51,7 @@ from peach.catalog_rules import (
     scrapes_as_jav,
     tokyo_hot_code,
     western_release_identity,
+    without_store_prefix,
 )
 from peach import scripting
 from peach.migrations import upgrade
@@ -122,6 +123,13 @@ class NormalisationTests(unittest.TestCase):
         self.assertFalse(is_jav_asset("HHD800", None, "2022-04-01"))
         self.assertFalse(is_jav_asset("HHD800", None, None, ("performer",)))
         self.assertTrue(is_jav_asset("PBD390", "MOODYZ"))
+
+    def test_store_prefix_is_dropped_only_for_verified_labels(self):
+        self.assertEqual(without_store_prefix("107stzy019"), "STZY-019")
+        self.assertTrue(same_release_code("107STARS-325", "STARS-325"))
+        # 素人系前缀是作品身份的一部分，未核验的前缀仍是另一部作品。
+        self.assertEqual(without_store_prefix("259LUXU-1475"), "259LUXU-1475")
+        self.assertFalse(same_release_code("348NTR-001", "NTR-001"))
 
 
 class ScrapeGateTests(unittest.TestCase):

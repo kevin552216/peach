@@ -1,5 +1,8 @@
 import { islandButton, islandGlyph, islandSelect } from './island-skeleton';
-import { FIELDSET_FACE, FIELDSET_BODY, FIELDSET_FOOT, fieldsetClass, type FieldsetLayout } from './react/components/fieldset-layout';
+import { FIELDSET_BODY, FIELDSET_FOOT, fieldsetClass, type FieldsetLayout } from './react/components/fieldset-layout';
+import { CLEANUP_TOOLS } from './cleanup-tools';
+import { CLEANUP_ENTRY, CLEANUP_ENTRY_GRID } from './react/data-cleanup/cleanup-entry';
+import { PLAIN_STAT_STRIP, plainStatClass } from './react/components/stat-card';
 
 /* 「扫描与采集」「媒体修复」两张卡的正文。卡片本体由 React 画，骨架与遗留层的取数占位
    画的是同一段话：写两份的话，骨架上的那句会比真卡短一截，接管时整张卡跳一次。 */
@@ -38,21 +41,17 @@ export function repairCardSkeletonHtml(): string {
       </section>`);
 }
 
-/** 首屏复用读数卡、三张任务卡、链接管理与资源同步的最终容器；静态标题、正文和键立即呈现。 */
+/** 首页骨架与最终页面共用工具顺序；完整表单、结果和清单在二级页加载。 */
 export function cleanupSkeletonHtml(): string {
-  const stats = [['人工复核', 'square-check-big'], ['高清版', 'sparkles'], ['重复文件', 'file-stack'], ['垃圾文件', 'file-archive'], ['回收站', 'trash']];
-  const face = FIELDSET_FACE;
-  const body = FIELDSET_BODY.stack;
-  const title = (label: string, gap = 'mb-2') => `<h3 class="text-title-2-medium text-text-primary ${gap}">${label}</h3>`;
-  const footer = (label: string) => `<footer class="${FIELDSET_FOOT.stack}">${islandButton({ label, attrs: waitingAction })}</footer>`;
-  const input = (label: string) => `<div class="flex flex-col gap-1.5"><span class="text-body-medium text-text-primary">${label}</span><span class="skeleton ui-configuration-skeleton-input"></span></div>`;
+  const entry = (label: string, glyph: string, summary: string, detail = '') => `<div class="${CLEANUP_ENTRY.face}"><span class="${CLEANUP_ENTRY.icon}">${islandGlyph(glyph, 'size-5')}</span><span class="${CLEANUP_ENTRY.body}"><span class="${CLEANUP_ENTRY.title}">${label}</span><span class="${CLEANUP_ENTRY.summary}">${summary}</span>${detail ? `<span class="${CLEANUP_ENTRY.detail}">${detail}</span>` : ''}</span>${islandGlyph('chevron-right', CLEANUP_ENTRY.arrow)}</div>`;
+  const stat = (label: string, glyph: string) => `<div class="${plainStatClass()}"><span class="flex min-w-0 items-center gap-2 text-body-medium text-text-secondary"><i class="flex size-8 shrink-0 items-center justify-center rounded-md bg-background-primary-default text-text-primary">${islandGlyph(glyph, 'size-4')}</i><span>${label}</span></span><strong class="block text-title-1-medium tabular-nums text-text-primary">${bar}</strong><span class="block min-h-4 text-caption-1-regular text-text-tertiary">${bar}</span></div>`;
+  const heading = (label: string) => `<h2 class="text-title-2-medium! m-0! text-text-primary">${label}</h2>`;
+  const tools = (deletion: boolean) => CLEANUP_TOOLS.filter(tool => (tool.key === 'batch-delete') === deletion)
+    .map(tool => entry(tool.title, tool.icon, tool.description)).join('');
   return `<div class="peach-react" data-skeleton="cleanup" aria-busy="true" role="status" aria-label="正在读取数据管理状态"><div aria-hidden="true" inert class="mx-auto flex w-full max-w-board flex-col gap-8">
-    <div class="inline-grid w-full grid-cols-5 gap-4 max-plain-stat-pair:grid-cols-2 max-plain-stat-single:grid-cols-1">${stats.map(([label, glyph]) => `<div class="min-w-0 bg-background-secondary-default rounded-2xl flex min-h-33 flex-col gap-2 p-4 text-left"><span class="flex min-w-0 items-center gap-2 text-body-medium text-text-secondary"><i class="flex size-8 shrink-0 items-center justify-center rounded-md bg-background-primary-default text-text-primary">${islandGlyph(glyph!, 'size-4')}</i>${label}</span><strong class="text-title-1-medium">${bar}</strong><span class="text-caption-1-regular">${bar}</span></div>`).join('')}</div>
-    <div class="flex flex-col gap-4 max-cleanup-tight:gap-3">
-      <div id="libraryProcessing">${scanCardSkeletonHtml()}</div><div id="mediaRepair">${repairCardSkeletonHtml()}</div>
-      <section id="organize" class="${face} flex flex-col" data-cleanup-organize><div class="${body}">${title('整理', 'mb-3')}<p class="text-body-regular text-text-secondary">清理文件名中的特殊符号与乱码，也可按模板改名并归入目录。先预览，确认后执行；执行过的一批可以整批退回。</p>
-        <div class="mt-3 flex flex-col gap-3"><div class="flex min-w-0 flex-wrap items-start gap-2">${islandSelect(bar)}<span class="skeleton ui-configuration-skeleton-input min-w-0 basis-64 flex-1"></span></div><p class="text-caption-1-regular text-text-secondary">指定路径时包含子目录，目录模板以该路径为起点。模板均留空时只清理文件名。</p>${input('文件名模板')}${input('目录模板')}<div class="flex flex-wrap gap-2">${Array.from({ length: 3 }, () => islandButton({ variant: 'secondary', label: bar, attrs: waitingAction })).join('')}</div></div></div>${footer('预览')}</section>
-    </div>
-    <section id="link-manager" class="flex scroll-mt-20 flex-col gap-4"><div class="${face} flex flex-col"><div class="${body}">${title('链接管理')}<div class="link-stat-grid mt-4 gap-x-8 gap-y-3">${['链接总数', '官网/事务所', '社交账号', '作品资料站'].map(label => `<div class="flex min-w-0 flex-col gap-0.5"><span class="text-caption-1-regular text-text-secondary">${label}</span><b class="text-title-2-semibold">${bar}</b></div>`).join('')}</div><div class="mt-4 flex flex-col gap-0.5"><span class="text-caption-1-regular text-text-secondary">主要站点</span>${bar}</div></div>${footer('检查死链')}</div></section>
+    <section class="flex flex-col gap-4">${heading('待处理事项')}<div class="${PLAIN_STAT_STRIP}">${[['人工复核', 'square-check-big'], ['重复文件', 'file-stack'], ['垃圾文件', 'file-archive'], ['高清版', 'sparkles'], ['回收站', 'trash']].map(([label, glyph]) => stat(label!, glyph!)).join('')}</div></section>
+    <div id="libraryProcessing" class="scroll-mt-20">${scanCardSkeletonHtml()}</div>
+    <section class="flex flex-col gap-4">${heading('整理与维护')}<div class="${CLEANUP_ENTRY_GRID}">${tools(false)}</div></section>
+    <section class="flex flex-col gap-4">${heading('清理与删除')}<div class="${CLEANUP_ENTRY_GRID}">${tools(true)}</div></section>
     </div></div>`;
 }

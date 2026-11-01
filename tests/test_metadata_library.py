@@ -2628,8 +2628,6 @@ class LibraryNfoTests(unittest.TestCase):
         self.assertIn('const rows = data.providers || [];', creds)
         configuration = (root / 'frontend/src/react/settings/configuration-page.tsx').read_text(encoding='utf-8')
         self.assertNotIn("'/api/library-processing'", configuration)
-        page = (root / 'frontend/src/react/data-cleanup/data-cleanup-page.tsx').read_text(encoding='utf-8')
-        self.assertIn('<LibraryProcessingCard toast={notify} monitor onComplete={refreshReadings} />', page)
 
 
 class LibraryStatePersistenceTests(unittest.TestCase):

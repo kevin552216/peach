@@ -14,7 +14,6 @@ import { apiGet } from '../../api';
 import { javImageKind } from '../../jav-artwork';
 import type { CatalogGridProps, MediaItem, MediaPage } from './types';
 import { queryClient } from '../query';
-import { catalogView } from './catalog-view';
 
 /** 竖屏带一条放几张。 */
 export const SHORTS_BATCH = 18;
@@ -95,21 +94,12 @@ export function entityQuery(props: CatalogGridProps) {
   };
 }
 
-/** 首屏取数（目录网格那条路由的 `prefetch`）。只有目录要等：资料页的作品区第一页跟着资料页递进来，
- *  网格挂上时自己落进缓存（`initialData`）。 */
-export async function prefetchCatalogGrid(props: CatalogGridProps, signal: AbortSignal): Promise<void> {
-  if (props.mode !== 'catalog' || props.wall || catalogView() === 'list') return;
-  const query = catalogQuery(props);
-  await queryClient.fetchInfiniteQuery({
-    ...query, queryFn: ({ pageParam }) => query.queryFn({ pageParam: pageParam as number, signal }),
-  });
-}
-
 /** 同一集合的分页保存在 Query 中；刷新代次之间认领整份分页，不复制作品到界面状态。 */
 export function latestCatalogPages(key: QueryKey): InfiniteData<GridPage, number> | undefined {
   const exact = JSON.stringify(key);
   const cached = queryClient.getQueryCache().findAll({ queryKey: key.slice(0, -1) })
-    .filter(query => JSON.stringify(query.queryKey) !== exact && Array.isArray((query.state.data as InfiniteData<GridPage> | undefined)?.pages))
+    .filter(query => JSON.stringify(query.queryKey) !== exact && !query.state.isInvalidated
+      && Array.isArray((query.state.data as InfiniteData<GridPage> | undefined)?.pages))
     .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt)[0];
   return cached?.state.data as InfiniteData<GridPage, number> | undefined;
 }
@@ -226,6 +216,12 @@ export function replaceCatalogItem(id: number, patch: Partial<MediaItem>): void 
 
 /** 同上，换的是 `match` 认出来的每一张：一个番号的几段、几个版本共用同一张封面。 */
 export function patchCatalogItems(match: (item: MediaItem) => boolean, patch: Partial<MediaItem>): void {
+  queryClient.setQueriesData<{ cuts: ShortsCut[] }>({ queryKey: ['catalog-short-layout'] }, data => {
+    if (!data || !data.cuts.some(cut => cut.items.some(match))) return data;
+    return { ...data, cuts: data.cuts.map(cut => ({ ...cut,
+      items: cut.items.map(item => match(item) ? { ...item, ...patch } : item),
+    })) };
+  });
   queryClient.setQueriesData<MediaPage>({ queryKey: ['catalog-grid', 'table'] }, data => {
     if (!data?.items.some(match)) return data;
     return { ...data, items: data.items.map(item => match(item) ? { ...item, ...patch } : item) };

@@ -138,7 +138,7 @@ const dismissOutsideSearch=event=>{
 };
 applicationEffects.listen(document, 'pointerdown', dismissOutsideSearch, true);
 applicationEffects.listen(document, 'focusin', dismissOutsideSearch);
-applicationEffects.handler($('#brandHome'), 'onclick', e=>{e.preventDefault();goHome(null,true)});
+applicationEffects.handler($('#brandHome'), 'onclick', e=>{e.preventDefault();goHome()});
 applicationEffects.listen(document, 'keydown', e=>{
   if(e.key==='Escape'){
     const settings=settingsPanelApi();

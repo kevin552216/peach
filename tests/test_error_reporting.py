@@ -231,6 +231,8 @@ class ErrorReportingTests(unittest.TestCase):
         from peach.routes_api import require_auth
         from peach.routes_configuration import router
         from peach.review_csv import write_rows
+        from peach.web_contract import WebContract
+        from support.ledger import fresh_ledger
         config, _evidence = self.scraping_config()
         outside = self.root / 'outside.json'
         outside.write_text(json.dumps({'title': 'private-outside-evidence'}), encoding='utf-8')
@@ -241,6 +243,7 @@ class ErrorReportingTests(unittest.TestCase):
                    [dict(item_key='asset:1:title', code='ABC-123', candidates_json=json.dumps([
                        {'value': '公开作品名', 'raw_snapshot': str(outside)}]))])
         app = FastAPI()
+        app.state.web_contract = WebContract(fresh_ledger(self.root))
         app.include_router(router)
         app.dependency_overrides[require_auth] = lambda: {}
         client = TestClient(app, base_url='http://127.0.0.1', client=('127.0.0.1', 1234))

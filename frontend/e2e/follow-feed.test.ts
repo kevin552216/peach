@@ -400,11 +400,12 @@ describe('关注页岛', () => {
         authors: document.querySelectorAll('button[data-follow-author]').length,
         glass: !!document.querySelector('[data-follow-filter-glass]'),
         wholePage: !!document.querySelector('#stats .followauthors'),
-        skeletons: document.querySelectorAll('[data-skeleton]').length,
+        skeletons: [...document.querySelectorAll('[data-skeleton]')]
+          .filter(node => !node.closest('[data-content-skeleton][aria-hidden="true"]')).length,
       }));
       assert.deepEqual(during, { head: true, authors: 6, glass: true, wholePage: false, skeletons: 1 });
       await opened.stub.release();
-      await page.locator('[data-follow-list-body] [data-skeleton]').waitFor({ state: 'detached', timeout: 10_000 });
+      await page.locator('[data-follow-list-body] [data-skeleton]').waitFor({ state: 'hidden', timeout: 10_000 });
       await page.locator(CARDS).first().waitFor();
       assert.deepEqual(opened.problems, []);
     } finally {

@@ -53,7 +53,9 @@ export PATH="$PWD/build/macos-media-toolchain/env/bin:$PATH"
 
 构建脚本读取随包 Mach-O 的系统版本下限，填入 `LSMinimumSystemVersion` 并重新签名。构建解释器也必须支持目标系统；Homebrew Python 可能要求构建机的系统版本。`watchdog` 等本机编译扩展若命中旧缓存，需带部署目标和对应的 `ARCHFLAGS`，通过 `uv sync --locked --extra build --extra macos --no-cache --reinstall-package watchdog --no-binary-package watchdog` 重编，再核对产物报告的 `minimum_macos`。
 
-打开匹配架构的 DMG，把 `Peach.app` 拖入 Applications，再打开应用完成首次设置。菜单栏提供打开页面、重启和退出入口；数据默认保存在 `~/Library/Application Support/Peach/peach-data`，可用 `PEACH_DATA_ROOT` 指定独立目录。
+打开匹配架构的 DMG，把 `Peach.app` 拖入 Applications，再打开应用完成首次设置。菜单栏提供打开页面、重启、查看日志、导出诊断报告、检查更新和退出入口；数据默认保存在 `~/Library/Application Support/Peach/peach-data`，可用 `PEACH_DATA_ROOT` 指定独立目录。
+
+更新按 macOS 应用的常规做法手动替换：配置页「检查更新」只认本机架构的 DMG，有新版本时给出该 DMG 的下载键，下载后同样拖入 Applications 覆盖旧版本，数据目录与设置保留。macOS 没有应用内安装与自动下载，自动更新只做定期检查。卸载时先在配置页关闭开机自启并退出 Peach，再把应用移到废纸篓；需要完全卸载时，再删除配置页「卸载 Peach」列出的数据目录。
 
 测试包没有公证，从浏览器或聊天软件下载后带有隔离属性，较新的 macOS 会提示「Peach 已损坏，无法打开」，「隐私与安全性」里也不出现「仍要打开」。拖入 Applications 后在终端执行下面的命令，再打开应用：
 
@@ -209,6 +211,14 @@ Windows 测试包默认使用 `%LOCALAPPDATA%\Peach\peach-data`。首次设置�
 - 扫描跳过 `#recycle` 和名称以 `@` 开头的 NAS 系统目录；同名前缀的普通文件仍按文件类型处理。
 
 ### 长时任务断点续跑
+
+任务中心为本机执行的任务提供「暂停」「继续」「取消」。暂停保留当前任务和已保存结果；在途步骤尚未停稳时显示「正在暂停」。继续沿用原任务，取消则等待所属线程和子进程退出，再显示「已取消」，保留已完成结果并停止后续工作。父任务的操作覆盖全部后继，包括列表中未展开的任务。文件替换等提交步骤先完整提交，再响应控制请求。云下载在远端执行，操作以渠道实际支持的能力为准。
+
+播放触发的文件头修复、发现页资料读取和诊断导出同样登记在任务中心。媒体子进程可暂停、继续和取消，暂停时长不计入处理超时。支持断点恢复的任务在重启后保留暂停意图；没有恢复入口的即时任务在服务关闭后结算，不留下无法继续的排队任务。
+
+活动任务显示蓝色 CPU、紫色 GPU 与青色网络标签。CPU 百分比以执行端可用计算容量为 100%，计入已登记的工作线程与所属子进程；共享原生线程无法准确归属时不计入。macOS 按原生线程 ID 读取时间，Linux 与 Docker 同时考虑 CPU 亲和性和当前命名空间可见的 cgroup v1/v2 配额。无法读取容量时显示「未取得」。
+
+逐任务 GPU 显示所属子进程最忙引擎的使用率。Windows 使用系统引擎计数器；Linux 使用驱动提供的 DRM fdinfo 引擎时间，Docker 需要映射 GPU 设备并允许读取任务进程信息。macOS、未提供 DRM 引擎时间的驱动、设备未映射、权限不足，以及共享 GPU 活动无法准确归属的情况显示「未取得」并说明原因。网络显示已观测的下载速度，挂载与 SMB 的缓存、预读以及未计量的外部请求显示「未取得」，不以零值代替。首次读取显示「采样中」。CPU 或 GPU 达到 50%、下载达到 10 MiB/s 时，同色标签加深，仅作显示提示。已取消的任务显示红色标签。
 
 后台任务把任务标识、处理范围、完成集合和计数保存在本机。服务重启时接回同一条任务记录，继续未完成的部分。用户暂停的任务保持暂停；明确停止会取消恢复。失败、限流或未取得的结果保留原有重试与冷却规则，不作为成功项目跳过。
 
@@ -401,7 +411,7 @@ Windows 测试包在 Peach 配置「应用与维护 → 卸载 Peach」里卸载
 
 ### 本机诊断
 
-托盘「导出诊断报告」和系统诊断页「下载诊断报告」提供脱敏 ZIP。托盘导出完成后可打开目录、打开文件或关闭窗口；启动失败时，弹窗给出自动保存的报告位置。报告包含版本、系统信息、选定日志的末尾和可取得的系统检查；配置文件、凭据、Peach 数据库和媒体不进入报告。日志中的网址、本机路径、IP、邮箱和常见凭据字段会脱敏，发送前仍应检查报告内容。
+托盘「导出诊断报告」和系统诊断页「下载诊断报告」提供脱敏 ZIP。Windows 托盘导出完成后可打开目录、打开文件或关闭窗口，macOS 菜单栏导出后在访达中选中报告；启动失败时，弹窗给出自动保存的报告位置。报告包含版本、系统信息、选定日志的末尾和可取得的系统检查；配置文件、凭据、Peach 数据库和媒体不进入报告。日志中的网址、本机路径、IP、邮箱和常见凭据字段会脱敏，发送前仍应检查报告内容。
 
 独立包支持 `Peach.exe --diagnostic-report`，无需启动服务即可保存报告；指定目标文件时放在该参数后，已有文件不会覆盖。源码环境可用 `python -m peach.support_bundle` 取得同类报告。默认报告与错误日志保存在数据目录的 `logs`，目录不可写时使用系统临时目录下的 `Peach/logs`。
 
@@ -523,7 +533,7 @@ untrunc 按相同顺序查找，对应目录为 `tools/untrunc`。独立程序�
 - 同时最多进行 2 个转码或探测，单次最长 1 小时，关掉播放页会取消对应的任务。
 - 115 和 PikPak 的视频通过媒体库配置中声明的挂载目录播放。能不能播，以在 Peach 里实际打开一个已知视频为准。
 
-Peach 配置「媒体库与入库 → 视频预览」中的「抽帧解码方式」与「应用与维护 → 视频播放」中的「转码方式」分别保存为运行 Peach 那台电脑的偏好，两者互不影响，均可选择「自动（硬件优先）」或软件。抽帧设置控制封面、九宫格与时间轴；扫描、读 NFO 和时长探测不依赖 GPU。播放设置只控制 Peach 服务端的整片与 HLS 转码，浏览器直接播放时自行选择解码方式。保存无需重启，对新任务生效；已生成的有效缓存继续使用，运行中的 FFmpeg 不被强行中断。macOS 抽帧在同一超时预算内尝试 VideoToolbox，Windows 抽帧对 H.264、HEVC、VP9、AV1 尝试 D3D11VA，失败后都回退软件；视频编码格式探测按文件大小和修改时间缓存。Windows 播放的自动档依次探测 NVENC、AMF、QSV 编码，三者都不可用时用 D3D11VA 解码再交给 libx264；AMF 只接受 AMD 显卡上的 D3D11 设备，Peach 按显卡序号逐个探测。偏好通过 `/api/media-processing` 的 GET/POST 读写，`preview_acceleration` 和 `playback_acceleration` 分别接受 `auto/software`；省略的字段保持现值。这个接口与时间轴缩略图的 `/api/thumbnail-jobs` 和 `/api/configuration/*` 一样只接受运行 Peach 的电脑发来的请求，其他设备即使已登录或处于开放访问也返回 403。`PEACH_TRANSCODE_BACKEND` 可用于管理员诊断，支持 `auto/software/nvenc/amf/qsv/vaapi/videotoolbox`，显式 `software` 会保持禁用硬件。
+Peach 配置「媒体库与入库 → 视频预览」中的「抽帧解码方式」与「应用与维护 → 视频播放」中的「转码方式」分别保存为运行 Peach 那台电脑的偏好，两者互不影响，均可选择「自动（硬件优先）」或软件。抽帧设置控制封面、九宫格与时间轴；扫描、读 NFO 和时长探测不依赖 GPU。播放设置只控制 Peach 服务端的整片与 HLS 转码，浏览器直接播放时自行选择解码方式。保存无需重启，对新任务生效；已生成的有效缓存继续使用，运行中的 FFmpeg 不被强行中断。macOS 抽帧在同一超时预算内尝试 VideoToolbox，Windows 抽帧对 H.264、HEVC、VP9、AV1 尝试 D3D11VA，Linux 对同一范围尝试第一个可用 VAAPI 渲染节点，失败后都回退软件；视频编码格式探测按文件大小和修改时间缓存。Windows 播放的自动档依次探测 NVENC、AMF、QSV 编码，三者都不可用时用 D3D11VA 解码再交给 libx264；AMF 只接受 AMD 显卡上的 D3D11 设备，Peach 按显卡序号逐个探测。偏好通过 `/api/media-processing` 的 GET/POST 读写，`preview_acceleration` 和 `playback_acceleration` 分别接受 `auto/software`；省略的字段保持现值。这个接口与时间轴缩略图的 `/api/thumbnail-jobs` 和 `/api/configuration/*` 一样只接受运行 Peach 的电脑发来的请求，其他设备即使已登录或处于开放访问也返回 403。`PEACH_TRANSCODE_BACKEND` 可用于管理员诊断，支持 `auto/software/nvenc/amf/qsv/vaapi/videotoolbox`，显式 `software` 会保持禁用硬件。
 
 卡片悬停预览请求的 `/stream` 不带流会话，取消不了，也看不到浏览器断开。片源需要整片转码且没有现成缓存时，这条请求直接回 415，不启动 FFmpeg；详情与沉浸模式带会话播放，关闭时按会话结束转码。
 

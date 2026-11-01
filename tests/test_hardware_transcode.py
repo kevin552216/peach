@@ -116,6 +116,43 @@ class HardwareDetectionTests(unittest.TestCase):
             self.assertTrue(hardware.encoders(Path("ffmpeg")))
             self.assertEqual(run.call_count, 1)
 
+    def test_linux_frame_capture_uses_the_first_vaapi_node_that_initializes(self):
+        from peach import hardware_transcode
+        probes = []
+
+        def probe(_ffmpeg, _label, arguments):
+            probes.append(arguments)
+            return arguments[1] == "vaapi=va:/dev/dri/renderD129"
+
+        hardware_transcode._vaapi_device.cache_clear()
+        self.addCleanup(hardware_transcode._vaapi_device.cache_clear)
+        with tempfile.TemporaryDirectory() as directory:
+            ffmpeg = Path(directory) / "ffmpeg"
+            ffmpeg.write_bytes(b"")
+            ffmpeg.with_name("ffprobe").write_bytes(b"")
+            source = Path(directory) / "clip.mkv"
+            source.write_bytes(b"fixture")
+            with patch("peach.hardware_transcode.sys.platform", "linux"),                     patch.object(Path, "glob", return_value=[Path("/dev/dri/renderD128"), Path("/dev/dri/renderD129")]),                     patch.object(hardware_transcode, "_run_probe", side_effect=probe),                     patch("peach.media_processing_policy.acceleration", return_value="auto"):
+                for codec, expected in (("hevc", ("-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD129")),
+                                        ("vc1", ())):
+                    with self.subTest(codec=codec), patch.object(hardware_transcode, "_frame_codec", return_value=codec):
+                        self.assertEqual(hardware_transcode.frame_decode_options(str(ffmpeg), str(source)), expected)
+        self.assertEqual([arguments[:2] for arguments in probes],
+                         [("-init_hw_device", "vaapi=va:/dev/dri/renderD128"), ("-init_hw_device", "vaapi=va:/dev/dri/renderD129")],
+                         "渲染节点探测按 FFmpeg 缓存，第二部片不再探测")
+        self.assertNotIn("-hwaccel_output_format", expected)
+
+    def test_linux_frame_capture_without_render_nodes_stays_software_without_probing(self):
+        from peach import hardware_transcode
+        hardware_transcode._vaapi_device.cache_clear()
+        self.addCleanup(hardware_transcode._vaapi_device.cache_clear)
+        with tempfile.TemporaryDirectory() as directory:
+            ffmpeg = Path(directory) / "ffmpeg"
+            ffmpeg.write_bytes(b"")
+            with patch("peach.hardware_transcode.sys.platform", "linux"), patch.object(Path, "glob", return_value=[]),                     patch.object(hardware_transcode, "_run_probe") as probe,                     patch("peach.media_processing_policy.acceleration", return_value="auto"):
+                self.assertEqual(hardware_transcode.frame_decode_options(str(ffmpeg), str(ffmpeg)), ())
+            probe.assert_not_called()
+
 
 class WindowsBackendTests(unittest.TestCase):
     def setUp(self):

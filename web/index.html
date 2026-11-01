@@ -236,6 +236,7 @@ if(location.pathname==='/wall')document.documentElement.setAttribute('data-wall-
   <button class="ib" id="density" title="密度：大图 / 密集" aria-label="切换卡片密度"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-layout-grid"/></svg><span data-glass-drift aria-hidden="true"><span data-drift="b"><span></span></span><span data-drift="a"><span></span></span></span></button>
   <button class="ib" id="settingsBtn" title="设置" aria-label="打开设置"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-settings"/></svg><span data-glass-drift aria-hidden="true"><span data-drift="b"><span></span></span><span data-drift="a"><span></span></span></span></button>
 
+<button class="ib" id="tutorialBtn" title="新手教程" aria-label="打开新手教程"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-compass"/></svg></button>
 </header>
 
 <!-- 外网连不上时的通栏横幅（`react/network-banner.tsx`），由路由树画进这个节点；联网时它是空的。 -->
@@ -262,7 +263,7 @@ if(location.pathname==='/wall')document.documentElement.setAttribute('data-wall-
   <div class="loadmore mono" id="loadSentinel" hidden></div>
 </main>
 
-<section id="postSetupTutorial" aria-label="Peach 安装教程" aria-live="polite" hidden></section>
+
 
 <div id="scrim" data-sidebar-scrim></div>
 <!-- 左侧抽屉：滚动层是常驻组件 sidebar（`react/sidebar/`），由路由树画进 #drawerScroll；抽屉本身、覆盖式滚动条与底栏归壳。

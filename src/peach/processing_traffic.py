@@ -22,12 +22,16 @@ def _key(path):
 
 
 def record_download(size):
+    from .task_resources import record_download as task_download
+    task_download(size)
     meter = CURRENT.get()
     if meter is not None:
         meter.add(ROUTE.get(), size)
 
 
 def unobserved(reason):
+    from .task_resources import unobserved_network
+    unobserved_network(reason)
     meter = CURRENT.get()
     if meter is not None:
         meter.mark(ROUTE.get(), reason)

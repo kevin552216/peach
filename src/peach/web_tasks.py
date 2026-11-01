@@ -120,9 +120,21 @@ def _payload_reader(contract):
     from .job_recovery import read
 
     saved = {}
+    from .task_resources import Monitor
+    if not hasattr(contract, 'task_resource_monitor'):
+        with contract.cache_lock:
+            if not hasattr(contract, 'task_resource_monitor'):
+                contract.task_resource_monitor = Monitor(contract.task_runs)
 
     def payload(row):
         result = row.payload()
+        from .task_control import projection
+        control = projection(contract.task_runs, row)
+        if control is not None:
+            result['control'] = control
+        resources = contract.task_resource_monitor.for_run(row)
+        if resources is not None:
+            result['resources'] = resources
         if row.task_key not in RESULT_FIELDS or row.status not in ('succeeded', 'failed'):
             return result
         if all(field in row.result_summary for field in RESULT_FIELDS[row.task_key]):

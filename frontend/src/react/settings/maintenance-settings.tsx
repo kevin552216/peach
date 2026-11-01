@@ -1,4 +1,4 @@
-/* 「应用与维护」的后半段：存储空间、数据上传、运行信息、安装教程与卸载。少改的隐私开关和只读信息在后，
+/* 「应用与维护」的后半段：存储空间、数据上传、运行信息、新手教程与卸载。少改的隐私开关和只读信息在后，
  * 卸载是不可逆动作，留在整组最后。 */
 import { useState, type FormEvent } from 'react';
 import { confirmModal } from '@peach/legacy/ui';
@@ -28,7 +28,7 @@ export function MaintenanceSettings(
   return (
     <div {...groupRoot(panel)}>
       {data.storage ? <StorageSettings initial={data.storage} receipt={receipt} /> : null}
-      {data.remote_reporting || data.library_sharing ? <Section id="librarySharing" title="数据上传">
+      {data.remote_reporting || data.library_sharing ? <Section id="librarySharing" guide="reporting" title="数据上传">
         {data.remote_reporting ? <RemoteReportingSettings initial={data.remote_reporting} receipt={receipt} /> : null}
         {data.library_sharing ? <div className="border-t border-separator-border">
           <LibrarySharingSettings initial={data.library_sharing} receipt={receipt} />
@@ -41,17 +41,13 @@ export function MaintenanceSettings(
   );
 }
 
-/** 安装教程的重开入口。教程卡本身还画在遗留层，这里只按一下让它回来。 */
-export function TutorialSettings({ receipt, reopenTutorial }: ConfigurationProps) {
-  const action = useAction();
-  const reopen = () => void action.run('reopen', () => reopenTutorial(),
-    () => receipt('已重新打开安装教程'));
+/** 恢复账本共享的教程入口，保留首次设置与章节进度。 */
+export function TutorialSettings({ reopenTutorial }: ConfigurationProps) {
   return (
-    <section aria-label="安装教程" className="w-full"><SettingsCard>
-      <Rows><SettingsRow label="安装教程">
-        <Button variant="secondary" onClick={reopen} {...busyProps(action.busy === 'reopen')}>重新打开教程</Button>
+    <section aria-label="新手教程" className="w-full"><SettingsCard>
+      <Rows><SettingsRow label="新手教程" description="在所有设备上恢复右上角教程入口，保留已读进度">
+        <Button variant="secondary" onClick={() => void reopenTutorial()}>重新打开</Button>
       </SettingsRow></Rows>
-      {action.error ? <Stack><ErrorText>{action.error}</ErrorText></Stack> : null}
     </SettingsCard></section>
   );
 }
@@ -74,7 +70,7 @@ export function AutomaticUpdates({ initial, receipt }: { initial: AutomaticUpdat
       ? '下载完成后在这里确认重启安装。'
       : undefined;
   return (
-    <Section id="automaticUpdates" title="自动更新" onSubmit={submit}>
+    <Section id="automaticUpdates" guide="automatic-updates" title="自动更新" onSubmit={submit}>
       <Rows>
         <SettingsRow label="自动检查新版本">
           <Switch aria-label="自动检查新版本" isSelected={mode !== 'off'} isDisabled={!initial.available}
@@ -102,7 +98,7 @@ export function AutomaticUpdates({ initial, receipt }: { initial: AutomaticUpdat
 
 function Facts({ facts }: { facts: ConfigurationFact[] }) {
   return (
-    <Section title="运行信息">
+    <Section guide="facts" title="运行信息">
       <FactList>
         {facts.map((fact) => (
           <Fact key={fact.term} term={fact.term}>
@@ -137,7 +133,7 @@ export function UninstallSettings(
   const status = accepted || uninstall.message;
   const paths = [...new Set([uninstall.data_root, ...uninstall.directories])];
   return (
-    <Section id="uninstallPeach" title="卸载 Peach">
+    <Section id="uninstallPeach" guide="uninstall" title="卸载 Peach">
       {uninstall.available ? <Stack><Help>卸载移除 Peach 程序本身，原始媒体文件保留。</Help></Stack> : null}
       <Rows>
         <SettingsRow label="完全卸载" description="同时删除设置、本地数据库、观看记录、凭据和缓存">

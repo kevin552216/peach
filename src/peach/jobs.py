@@ -328,6 +328,7 @@ class BackgroundJob:
         self._run_ids: dict[str, int] = {}
         self._activity_files: dict[str, Path] = {}
         self._recoverable: set[str] = set()
+        self._cancelled_stops: set[str] = set()
         self._paused_stops: set[str] = set()
         #: 摘 run id 与把那一行写成结束是同一件事：只摘不写完就放手的话，另一个线程
         #: 看见 id 没了以为已经收过尾，紧接着开的下一轮会撞上那一行还没释放的互斥键。
@@ -375,6 +376,8 @@ class BackgroundJob:
         退出时把进度同步进 `task_run`，写库在锁外：那一步要拿数据库的写锁，套在本类
         的锁里面就多了一组取锁顺序，而进度本来不需要和状态原子。节流由 store 做。
         """
+        from .task_control import checkpoint
+        checkpoint()
         if job_id in self._recoverable:
             from .update_tasks import check_pause
             check_pause(self._database_path())
@@ -583,6 +586,19 @@ class BackgroundJob:
         """
         from .update_tasks import _mutex, state_for
         db = self._database_path()
+        current = self.snapshot() or {}
+        run_id = self._run_ids.get(current.get(self.id_key))
+        if db is not None and run_id is not None:
+            from . import task_control
+            if not resume:
+                with _mutex(state_for(db)):
+                    task_control.request(self.runs, run_id, 'cancel')
+                    self._cancelled_stops.add(current[self.id_key])
+                thread = self.thread
+                if thread is not None and thread is not threading.current_thread():
+                    thread.join(timeout)
+                return
+            task_control.shutdown(db, run_id)
         with _mutex(state_for(db)) if db is not None else nullcontext():
             if not resume and db is not None:
                 from .job_recovery import cancel
@@ -633,10 +649,19 @@ class BackgroundJob:
         parent_run = current_run.set(None)
         parent_job = current_job_id.set(None)
         context = current_db.set(self._database_path() if job_id in self._recoverable else None)
+        from .task_control import Cancelled as TaskCancelled
         try:
             from .update_tasks import check_pause
-            check_pause(current_db.get())
-            fn(job_id)
+            from .task_control import bind, checkpoint
+            with bind(self.runs, self._run_ids.get(job_id), recoverable=job_id in self._recoverable) if self.runs is not None else nullcontext():
+                check_pause(current_db.get())
+                fn(job_id)
+                checkpoint()
+        except TaskCancelled:
+            with self.lock:
+                if self.state is not None and self.state.get(self.id_key) == job_id:
+                    self.state.update(status='cancelled', outcome='cancelled', error='',
+                                      followups=[], completed_at=time.time())
         except JobPaused:
             with self.lock:
                 if self.state is not None and self.state.get(self.id_key) == job_id:
@@ -680,11 +705,16 @@ class BackgroundJob:
                     checkpoint(db, self.task_key, job_id, state)
                     finish(db, self.task_key, job_id,
                            state['status'] if state.get('status') in ('failed', 'cancelled') else 'complete')
+                if db is not None and job_id in self._cancelled_stops:
+                    from .job_recovery import cancel, read
+                    if read(db, self.task_key).get('job_id') == job_id:
+                        cancel(db, self.task_key)
             finally:
                 activity = self._activity_files.pop(job_id, None)
                 if activity is not None:
                     activity.unlink(missing_ok=True)
                 self._recoverable.discard(job_id)
+                self._cancelled_stops.discard(job_id)
                 self._paused_stops.discard(job_id)
 
     def _settle(self, job_id: str) -> None:

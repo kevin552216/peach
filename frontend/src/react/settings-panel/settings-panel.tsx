@@ -35,6 +35,7 @@ import { fetchSettings, refreshPanelData, SETTINGS_KEY, useSaveSettings } from '
 import { Note } from '../components/note';
 import { SidebarOrder } from './sidebar-order';
 import { SettingsDialogClose } from '../components/settings-dialog-close';
+import { GuideHelp } from '../onboarding/guide-help';
 
 /* 左栏的分区，顺序即右边各组的顺序。字形按条目自己的名字取：整列取自 Remix，一家画的笔画
    才一样粗。 */
@@ -251,6 +252,7 @@ function Group({ index, tab, children, cards = false }: { index: number; tab: nu
     <section data-setting-group="" data-setting-layout={cards ? 'cards' : undefined}
       id={groupId(index)} role="tabpanel" aria-labelledby={tabId(index)} hidden={index !== tab}>
       <h3>{SECTIONS[index][0]}</h3>
+      <GuideHelp chapter={['appearance', 'playback', 'jav-settings', 'search-settings', 'content'][index]} />
       {children}
     </section>
   );

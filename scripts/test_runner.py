@@ -37,8 +37,8 @@ SCOPES: dict[str, tuple[str, ...]] = {
     "checks": ("test_copy_final_state.py", "test_dependency_policy.py", "test_repo_hygiene.py", "test_test_planning.py", "test_reference_updates.py", "test_readme_contracts.py",
                "test_complexity_ratchet.py", "test_source_assertion_ratchet.py", "test_python_lint.py"),
     "follow": ("test_follow*.py", "test_http.py", "test_migrations.py", "test_wants_web.py"),
-    "catalog": ("test_duplicate_files.py", "test_ad_judgement.py", "test_composite_name_split.py", "test_media_libraries.py", "test_media_folders.py",
-                "test_content_region.py",
+    "catalog": ("test_ad_judgement.py", "test_composite_name_split.py", "test_media_libraries.py", "test_media_folders.py",
+                "test_content_region.py", "test_performer_delete.py",
                 "test_duplicate_identity_merge.py",
                 "test_entity_classification.py", "test_company_profiles.py", "test_fc2_sellers.py",
                 "test_entity_merge.py", "test_entity_redirect.py", "test_fastapi_api.py", "test_field_owners.py",
@@ -61,11 +61,11 @@ SCOPES: dict[str, tuple[str, ...]] = {
                 "test_web_perf.py", "test_web_resource_sync.py", "test_record_rehome.py", "test_wants.py",
                 "test_magnet_chain.py",
                 "test_web_orphan_records.py",
-                "test_web_review.py", "test_web_settings.py"),
+                "test_web_review.py", "test_web_settings.py", "test_duplicate_files.py"),
     # 任务中心的两个文件跟着 `test_jobs.py` 走：`jobs.py` 与 `task_runs.py` 是同一条
     # 接线的两端，改哪一端都要两边一起验。
     "media": ("test_external_playback.py", "test_runtime_consistency.py", "test_endcard.py", "test_fastapi_api.py", "test_jobs.py",
-              "test_task_runs.py", "test_followups.py", "test_task_center_integration.py", "test_face_models.py",
+              "test_task_runs.py", "test_followups.py", "test_task_center_integration.py", "test_task_control.py", "test_task_resources.py", "test_resource_platform.py", "test_face_models.py",
               "test_frame_capture.py", "test_timeline_sheets.py", "test_processing_control.py", "test_processing_traffic.py", "test_processing_inventory.py",
               "test_web_timeline_thumbnails.py", "test_timeline_sources.py", "test_bif.py",
               "test_interaction.py", "test_media.py", "test_mp4repair.py",
@@ -119,7 +119,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
                 "test_windows_update.py", "test_release_updates.py", "test_automatic_updates.py", "test_standalone_update.py", "test_upgrade_repairs.py", "test_certs.py", "test_config.py",
                 "test_fsutil.py", "test_desktop_settings.py", "test_desktop_installer.py", "test_data_storage.py",
                 "test_job_status.py", "test_jobs.py", "test_task_runs.py", "test_followups.py", "test_update_tasks.py",
-                "test_task_center_integration.py", "test_reference_updates.py",
+                "test_task_center_integration.py", "test_task_control.py", "test_task_resources.py", "test_resource_platform.py", "test_reference_updates.py",
                 "test_repo_hygiene.py", "test_seed_pack.py", "test_seed_followup.py",
                 "test_review_csv.py", "test_jav_code_domain.py", "test_organize.py",
                 "test_link_repair.py", "test_tag_management.py",
@@ -138,7 +138,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     # 后面七个文件的主体不在这一层，但各有一段断言读 `web/` 或 `frontend/` 的源码，
     # 所以本域也要登记它们：改了 `web/app.js` 却漏跑读它的测试，`test_test_planning.py`
     # 的域映射门槛会在本地就红。
-    "web": ("test_duplicate_files.py", "test_frontend_build.py", "test_frontend_preflight.py", "test_web_ui.py", "test_web_js.py", "test_web_e2e.py",
+    "web": ("test_frontend_build.py", "test_frontend_preflight.py", "test_web_ui.py", "test_web_js.py", "test_web_e2e.py",
             "test_tag_management.py",
             "test_subtitle_search.py", "test_subtitle_memory.py",
             "test_legacy_shell_routes.py",
@@ -146,7 +146,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
             "test_agency_entity.py", "test_label_maker.py", "test_dependency_policy.py",
             "test_desktop_settings.py", "test_dev_copy.py",
             "test_fastapi_api.py", "test_follow_assets.py", "test_follow_web.py",
-            "test_metadata_library.py", "test_processing_control.py", "test_processing_traffic.py", "test_processing_inventory.py", "test_clouddrive_proxy.py", "test_studio_icon_variants.py", "test_web_settings.py", "test_web_library_shortcuts.py", "test_company_profiles.py"),
+            "test_metadata_library.py", "test_processing_control.py", "test_processing_traffic.py", "test_processing_inventory.py", "test_clouddrive_proxy.py", "test_studio_icon_variants.py", "test_web_settings.py", "test_web_library_shortcuts.py", "test_web_tutorial.py", "test_company_profiles.py", "test_duplicate_files.py"),
     "core": ("test_access.py", "test_auth.py", "test_config.py", "test_field_owners.py",
              "test_entity_classification.py",
              "test_migrations.py", "test_ledger_revision.py",
@@ -206,6 +206,14 @@ AUTO_SCOPE_FILES: dict[str, tuple[str, ...]] = {
     "src/peach/menubar.py": ("sync", "tooling"),
     # 托盘子服务与隧道的 cloudflared 共用这份 Job Object；两边的测试都要跑到。
     "src/peach/process_job.py": ("tooling", "sync"),
+    'src/peach/task_control.py': ('catalog', 'media', 'metadata', 'follow', 'sync', 'tooling', 'web'),
+    'tests/test_task_control.py': ('media', 'tooling'),
+    'tests/test_task_resources.py': ('media', 'tooling'),
+    'tests/test_resource_platform.py': ('media', 'tooling'),
+    'src/peach/resource_platform.py': ('media', 'tooling', 'web'),
+    'src/peach/gpu_linux.py': ('media', 'tooling', 'web'),
+    'src/peach/task_resources.py': ('catalog', 'media', 'metadata', 'follow', 'sync', 'tooling', 'web'),
+    'src/peach/gpu_usage.py': ('media', 'tooling', 'web'),
     # 托盘重启的实现由 `test_restart_windows_tray.py` 验，模块名推不出来。
     "src/peach/windows_restart.py": ("tooling",),
     # 托盘「重启服务」按路径拉起这个脚本（`--source --force`），托盘测试也要跑到。
@@ -266,6 +274,7 @@ AUTO_SCOPE_FILES: dict[str, tuple[str, ...]] = {
     "src/peach/record_rehome.py": ("catalog", "tooling"),
     "src/peach/web_orphan_records.py": ("catalog", "web"),
     "src/peach/web_library_shortcuts.py": ("catalog", "web"),
+    "src/peach/web_tutorial.py": ("catalog", "web"),
     # 入口页共用件的测试住在首启与配置来源那两份 tooling 测试里。
     "src/peach/web_entry.py": ("catalog", "tooling", "web"),
     # 这几份文档有测试在读它们的正文：改文档也要跑到那条测试。

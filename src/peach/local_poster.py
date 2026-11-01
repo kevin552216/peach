@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 from PIL import Image
+from .task_control import run as run_task_process
 
 TIMEOUT_SECONDS = 20.0
 MAX_BYTES = 32 * 1024 * 1024
@@ -26,7 +27,7 @@ def read_jpeg(source: Path, *, isolated=True) -> tuple[bytes, tuple[int, int]]:
                else [sys.executable, '-m', 'peach.local_poster'])
     with tempfile.TemporaryDirectory(prefix='peach-local-poster-') as temporary:
         output = Path(temporary).resolve() / 'poster.jpg'
-        result = subprocess.run([*command, str(source), str(output)], stdin=subprocess.DEVNULL,
+        result = run_task_process([*command, str(source), str(output)], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE if CURRENT.get() is not None else subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, timeout=TIMEOUT_SECONDS,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)

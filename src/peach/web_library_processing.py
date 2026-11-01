@@ -39,6 +39,10 @@ def _current(contract):
     if live and live.get('status') in ACTIVE:
         return live
     stored = snapshot(settings_file.active())
+    from .job_recovery import read
+    recovery = read(contract.db_path, 'library-processing')
+    if recovery.get('status') == 'active' and recovery.get('job_id') == stored.get('job_id'):
+        stored['run_id'] = recovery.get('run_id')
     if live and live.get('job_id') == stored.get('job_id'):
         return {**stored, **live}
     if live and live.get('started_at', 0) > stored.get('started_at', 0):
@@ -61,7 +65,15 @@ def q_library_processing(contract, _args):
         from .processing_inventory import preview
         return {'traffic': preview(config, contract.db_path, stage, asset_ids, _args.get('inventory'),
                                    incremental=body.get('incremental', False))}
-    state = decorate(_current(contract))
+    state = _current(contract)
+    if state.get('status') in ACTIVE and state.get('run_id') is not None:
+        from .task_control import projection
+        run = contract.task_runs.get(state['run_id'])
+        control_state = projection(contract.task_runs, run) if run is not None else None
+        if control_state is not None:
+            status = control_state['state']
+            state['status'] = 'stopping' if status == 'cancelling' else status
+    state = decorate(state)
     control = control_for(settings_file.active())
     control.refresh(force=True)
     state['speed_mode'] = control.mode
@@ -164,6 +176,9 @@ def _control_action(contract, config, body):
     if job_id:
         control.select_job(str(job_id))
     if action == 'cancel':
+        if previous.get('run_id') is not None:
+            from .task_control import request
+            request(contract.task_runs, previous['run_id'], action)
         return _cancel_processing(contract, config, control, previous, str(job_id))
     if previous.get('status') == 'stopping':
         raise ValueError('正在等待任务停止，请稍后重试')
@@ -172,6 +187,9 @@ def _control_action(contract, config, body):
         return q_library_processing(contract, {})
     if action == 'set_speed':
         return _set_processing_speed(contract, control, previous, body)
+    if previous.get('run_id') is not None:
+        from .task_control import request
+        request(contract.task_runs, previous['run_id'], action)
     status = ('paused' if previous.get('status') == 'paused' else 'pausing') if action == 'pause' else 'running'
     _announce_control(contract.library_processing_job, str(job_id), status)
     control.request(action, str(job_id))

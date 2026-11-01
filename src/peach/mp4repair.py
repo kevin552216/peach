@@ -22,6 +22,7 @@ from pathlib import Path
 from .smb_media import input_url
 
 from .mp4index import _iter_boxes
+from .task_control import run as run_task_process
 
 LOGGER = logging.getLogger(__name__)
 
@@ -149,13 +150,15 @@ def _display_order(ffprobe: Path, source: Path, decode_times: list[int]) -> list
     `-threads 0` 不是调参，是补上 ffprobe 默认没开的解码线程：6297 上实测 300 秒内容
     从 27 秒降到 4 秒，整片从十几分钟降到一两分钟。
     """
+    from .task_resources import media_input
+    media_input(source)
     command = (
         str(ffprobe), "-v", "error", "-threads", "0",
         "-ignore_editlist", "1", "-select_streams", "v:0",
         "-show_entries", "frame=pts", "-of", "csv=p=0", input_url(source),
     )
     try:
-        completed = subprocess.run(command, capture_output=True, timeout=PROBE_TIMEOUT_SECONDS,
+        completed = run_task_process(command, capture_output=True, timeout=PROBE_TIMEOUT_SECONDS,
                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RepairUnavailable(f"ffprobe 没跑完：{exc}") from exc
@@ -532,7 +535,7 @@ class HeaderRepairStore:
     所以只在后台算、一次只算一部，算不出来就记下来别再试——调用方照旧走转码分片。
     """
 
-    def __init__(self, root: Path, resolver, *, max_concurrent: int = 1, cached: int = 4):
+    def __init__(self, root: Path, resolver, *, max_concurrent: int = 1, cached: int = 4, runs=None):
         self.root = Path(root)
         self.resolver = resolver
         self._slots = threading.Semaphore(max(1, max_concurrent))
@@ -543,6 +546,8 @@ class HeaderRepairStore:
         self._cached: dict[str, RepairedHeader] = {}
         self._cache_size = max(1, cached)
         self._guard = threading.Lock()
+        self.runs = runs
+        self._jobs = {}
 
     def _name(self, asset_id: int, source: Path) -> str | None:
         try:
@@ -584,10 +589,28 @@ class HeaderRepairStore:
         with self._guard:
             if name in self._running or name in self._failed:
                 return
-        threading.Thread(
-            target=self.repair_now, args=(asset_id, source),
-            name=f"PeachMp4Header-{asset_id}", daemon=True,
-        ).start()
+            previous = self._jobs.get(name)
+            if previous is not None:
+                state = previous.snapshot() or {}
+                if state.get('status') in ('running', 'cancelled'):
+                    return
+            from .jobs import BackgroundJob
+            job = BackgroundJob(f'PeachMp4Header-{asset_id}', task_key='mp4-header-repair',
+                                mutex_key=f'mp4-header-repair:{name}', runs=self.runs)
+            self._jobs[name] = job
+
+        def work(job_id):
+            made = self.repair_now(asset_id, source)
+            job.update(job_id, status='complete' if made else 'failed',
+                       repaired=int(made), error='' if made else '播放文件头未能修复')
+
+        job.start(work, initial={'stage': '读取帧时间戳', 'message': source.name, 'asset_id': asset_id})
+
+    def stop(self):
+        with self._guard:
+            jobs = list(self._jobs.values())
+        for job in jobs:
+            job.stop()
 
     def repair_now(self, asset_id: int, source: Path) -> bool:
         """当场算一份头并存下来。已经有、正在算或上次算不出来都返回 False。"""
@@ -600,8 +623,14 @@ class HeaderRepairStore:
                 return False
             self._running.add(name)
         try:
-            with self._slots:
+            from .task_control import checkpoint
+            while not self._slots.acquire(timeout=.1):
+                checkpoint()
+            try:
+                checkpoint()
                 write_sidecar(self.root / name, repaired_header(source, ffprobe.path))
+            finally:
+                self._slots.release()
             for stale in self.root.glob(f"{asset_id}-*{SIDECAR_SUFFIX}"):
                 if stale.name != name:
                     stale.unlink(missing_ok=True)

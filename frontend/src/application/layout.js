@@ -4,6 +4,7 @@ import { FOLLOW_INITIAL_RANGE_OPTIONS } from './initial-follow-ranges';
 import { noteHtml, revealTexts } from '../ui-kit';
 import { $, ROUTE_ENTITIES, STATE_LABELS, STATE_ROUTES, api, isCatalogPath } from '../core';
 import { buildBars, catalogLayoutProp, catalogState, clearCatalogGrid, commitContextFilter, emptyTrash, goHome, homePath, loadCatalog, paintCatalogFilter, repaintCatalogGrid, syncCatalogFilterScreen } from './catalog.js';
+import { rememberedSidebarPath, requestPageTop } from '../history/page-navigation';
 import { navigationState, openRoutedPage, paintSidebar, syncNavigation } from './navigation.js';
 import { paintManagementPlaceholder } from './../management-placeholder';
 import { hideDiscoveryBars } from './loading.js';
@@ -48,12 +49,14 @@ export function showManagementBody({manage=true,placeholder=''}={}){
 }
 
 export function enterManagementSurface(){
+  $('#javLibraryHeader').hidden=true;
   catalogState.hideCatalogCombo();
   hideDiscoveryBars();
   document.body.classList.remove('entity-open','index-open');
 }
 
 export function showHomeSurfaces(){
+  $('#javLibraryHeader').hidden=!isCatalogPath(location.pathname)||!javActive();
   // 两个类都要清：只清 entity-open 会让从索引页回首页时顶栏一直空着，
   // 而且下面那一行 style.display='' 恢复不了被 class 隐藏的元素。
   document.body.classList.remove('entity-open','index-open');
@@ -122,7 +125,7 @@ export function closeSettingsRoute(){
 export function sidebarHost(){
   return {
     scroll:$('#drawerScroll'),store:preferencesState.settingsStore,navCatalog:layoutState.NAV_CATALOG,
-    navOn,navTo,
+    navOn,navTo,navToTop:()=>{closeDrawerAfterNav();requestPageTop()},
     toggleChip:(key,value,multi)=>commitContextFilter(filters=>{
       if(multi){const cur=String(filters[key]||'').split(',').filter(Boolean);
         const i=cur.indexOf(value);if(i>=0)cur.splice(i,1);else cur.push(value);filters[key]=cur.join(',')}
@@ -326,7 +329,14 @@ export function navOn(k){
 }
 
 export function navTo(k){
-  closeDrawerAfterNav();                 // 点了就收起抽屉，且短暂禁止悬停把它立刻弹回
+  const remembered=rememberedSidebarPath(k);
+  if(remembered===location.pathname+location.search+location.hash)return;
+  // 当前项留在原位接收双击，换栏目才收起抽屉并短暂禁止悬停弹回。
+  closeDrawerAfterNav();
+  if(remembered){
+    navigationState.navigatePath(remembered);
+    return;
+  }
   if(layoutState.DIRECT_MANAGE_NAV[k]){openManage(layoutState.DIRECT_MANAGE_NAV[k]);return}
   if(k==='manage'){openManage();return}
   if(k==='jav'){navigationState.navigatePath('/jav');return}
@@ -337,7 +347,6 @@ export function navTo(k){
   if(k==='shorts'){state.orient='竖屏';state.state=''}else{state.orient='';state.state=k}
   notifyShell();
   navigationState.route(homePath());
-  showHomeSurfaces();
   syncNavigation();buildBars();
 }
 

@@ -126,7 +126,6 @@ export function OrphanRecordsCard({ toast }: { toast(message: string): void }) {
     { id: 'target', label: '操作', width: items.some(item => item.candidates.length) ? 360 : 128, min: 128, value: (item) => item.candidates.length,
       render: (item) => <OrphanActions item={item} toast={toast} /> },
   ];
-  if (!query.isError && !items.length) return null;
   return (
     <section id="orphan-records" aria-labelledby="orphan-records-title" className="flex scroll-mt-20 flex-col gap-4">
         {query.isError

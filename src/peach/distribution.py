@@ -10,6 +10,11 @@ def standalone() -> bool:
                 (Path(getattr(sys, "_MEIPASS", "")) / "standalone.txt").is_file())
 
 
+def in_app_update() -> bool:
+    """应用内下载并替换安装只有 Windows 独立包有；macOS 独立包下载 DMG 手动替换。"""
+    return sys.platform == "win32" and standalone()
+
+
 def user_data_root(environ: dict[str, str]) -> Path:
     if sys.platform == "win32":
         base = Path(environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")

@@ -5,6 +5,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -246,24 +247,54 @@ class RemoteReportingTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         reporting.save({"usage": True, "errors": True})
         program = ('from peach import diagnostic_frequency as f; '
+                   'from filelock import FileLock; '
+                   'f.FileLock=lambda path, **options: FileLock(path, **dict(options, timeout=10)); '
                    'from peach.settings_file import active; '
                    'from peach.remote_reporting import consent; '
                    'f.record(active(), consent()["revision"], {"release":"test", "tags":{"stage":"cli"}}, lambda e: True)')
         env = {**os.environ, 'PYTHONPATH': str(root / 'src'), 'PEACH_SENTRY_DSN': ''}
-        processes = [subprocess.Popen([sys.executable, '-X', 'utf8', '-c', program], env=env,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
-        for process in processes:
-            try:
-                stdout, stderr = process.communicate(timeout=30)
+        processes = []
+        try:
+            for _ in range(2):
+                processes.append(subprocess.Popen([sys.executable, '-X', 'utf8', '-c', program], env=env,
+                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+            outputs = [process.communicate(timeout=30) for process in processes]
+            for process, (stdout, stderr) in zip(processes, outputs):
                 self.assertEqual(process.returncode, 0, (stdout, stderr))
-            finally:
+        finally:
+            for process in processes:
                 if process.poll() is None:
                     process.kill()
-                    process.communicate()
+            for process in processes:
+                process.communicate()
         sent = []
         frequency.flush(self.config, reporting.consent()['revision'], lambda e: sent.append(e) or True, force=True)
         self.assertEqual(len(sent), 1)
         self.assertEqual(sent[0]['tags']['occurrence_count'], '1')
+
+    def test_contended_frequency_record_does_not_block_or_initialize_the_sender(self):
+        from filelock import FileLock
+        reporting.save({'usage': True, 'errors': True})
+        completed, results = threading.Event(), []
+        def submit():
+            try:
+                results.append(reporting.send('errors', {'message': 'locked'}, self.config))
+            finally:
+                completed.set()
+        worker = threading.Thread(target=submit)
+        path = self.config.directory('state') / 'remote-reporting-frequency.json.lock'
+        with mock.patch.object(reporting, '_new_client') as client, \
+                mock.patch.object(reporting, 'event_metadata', return_value={'release': 'test', 'tags': {}}):
+            try:
+                with FileLock(str(path), timeout=1):
+                    worker.start()
+                    self.assertTrue(completed.wait(5), '持锁期间上报应及时返回')
+            finally:
+                if worker.ident is not None:
+                    worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(results, [None])
+            client.assert_not_called()
 
     def test_frequency_shutdown_submits_pending_counts_and_stops_timer(self):
         reporting.save({"usage": True, "errors": True})

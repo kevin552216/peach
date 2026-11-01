@@ -3972,22 +3972,26 @@ class UnconfiguredMachineTests(unittest.IsolatedAsyncioTestCase):
             async with self.ledger_client(database) as (app, _client):
                 from peach.web_library_processing import w_library_processing
                 job = app.state.web_contract.library_processing_job
-                w_library_processing(app.state.web_contract, {'stage': 'previews'})
-                self.assertTrue(await asyncio.to_thread(entered.wait, 5))
-                run_id = job.snapshot()['run_id']
-                token = update_tasks.reserve(database)
                 try:
-                    checkpoint.set()
-                    await asyncio.to_thread(job.thread.join, 5)
-                    self.assertTrue(job.snapshot()['waiting_for_update'])
-                    self.assertEqual(app.state.web_contract.task_runs.get(run_id).status, 'pending')
+                    w_library_processing(app.state.web_contract, {'stage': 'previews'})
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 5))
+                    run_id = job.snapshot()['run_id']
+                    token = update_tasks.reserve(database)
+                    try:
+                        checkpoint.set()
+                        await asyncio.to_thread(job.thread.join)
+                        self.assertTrue(job.snapshot()['waiting_for_update'])
+                        self.assertEqual(app.state.web_contract.task_runs.get(run_id).status, 'pending')
+                    finally:
+                        update_tasks.release(database, token)
+                        checkpoint.set()
+                    self.assertTrue(await asyncio.to_thread(completed.wait, 5))
+                    await asyncio.to_thread(job.thread.join)
+                    self.assertEqual(calls, ['previews', 'previews'])
+                    self.assertEqual(job.snapshot()['run_id'], run_id)
                 finally:
-                    update_tasks.release(database, token)
                     checkpoint.set()
-                self.assertTrue(await asyncio.to_thread(completed.wait, 5))
-                await asyncio.to_thread(job.thread.join, 5)
-                self.assertEqual(calls, ['previews', 'previews'])
-                self.assertEqual(job.snapshot()['run_id'], run_id)
+                    await asyncio.to_thread(job.stop, None)
 
     async def test_preparing_the_ledger_requires_a_service_restart_to_resume_background_work(self):
         parent = self.settings.db_path.parent

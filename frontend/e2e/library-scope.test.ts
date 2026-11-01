@@ -15,9 +15,12 @@ describe('媒体库目录范围', () => {
         await page.route('**/api/libraries', route => route.fulfill({ json: {
           libraries: [{ id: 'first', name: '媒体库甲' }, { id: 'second', name: '媒体库乙' }],
         } }));
-        await page.route(/\/api\/(items|facets)(\?|$)/, async route => {
-          requests.push(route.request().url());
-          await route.continue();
+        // 导航提交后只记录新文档的请求，避免把旧页离开前的异步查询算入新媒体库。
+        page.on('framenavigated', frame => {
+          if (frame === page.mainFrame()) requests.length = 0;
+        });
+        page.on('request', request => {
+          if (/^\/api\/(items|facets)$/.test(new URL(request.url()).pathname)) requests.push(request.url());
         });
       });
       const { page } = opened;
@@ -29,15 +32,14 @@ describe('媒体库目录范围', () => {
           await page.locator('#brandHome').click();
           const choice = page.locator('#boardLibraryMenu').getByRole('button', { name: label, exact: true });
           await choice.waitFor({ state: 'visible' });
-          const start = requests.length;
           await Promise.all([page.waitForEvent('load'), choice.click()]);
           await page.locator('#brandHome h1').filter({ hasText: label }).waitFor();
           await page.waitForFunction(() => document.querySelector('#main [aria-busy="true"]') === null);
           await settle(page);
-          const current = requests.slice(start).map(url => new URL(url));
+          const current = requests.map(url => new URL(url));
           assert.ok(current.some(url => url.pathname === '/api/items'));
           assert.ok(current.some(url => url.pathname === '/api/facets'));
-          assert.ok(current.every(url => (url.searchParams.get('library') || '') === library), requests.slice(start).join('\n'));
+          assert.ok(current.every(url => (url.searchParams.get('library') || '') === library), requests.join('\n'));
         }
         assert.deepEqual(opened.problems, []);
       } finally { await opened.close() }

@@ -308,35 +308,37 @@ class SelectedProcessingTests(unittest.TestCase):
         from peach.processing_control import CURRENT
         from peach.update_tasks import current_db
         self.seed(duration=30)
-        media_entered, network_entered, advance, paused = (threading.Event() for _ in range(4))
+        ready = threading.Barrier(3, timeout=10)
+        advance, paused = threading.Event(), threading.Event()
         done = []
         results = []
-        def lane(entered, name):
+        def lane(name):
             self.assertIs(CURRENT.get(), control_for(self.config))
             self.assertEqual(current_db.get(), self.db)
-            entered.set()
-            advance.wait(5)
+            ready.wait()
+            self.assertTrue(advance.wait(10), '控制者应在双通道就绪后发出暂停')
             checkpoint()
             done.append(name)
         def report(state):
             if state['status'] == 'paused':
                 paused.set()
-        with patch('peach.library_processing_tasks.MetadataWork.run', side_effect=lambda: lane(network_entered, 'network')), \
-                patch('peach.library_processing._generate_previews', side_effect=lambda *a, **kw: lane(media_entered, 'media')):
+        with patch('peach.library_processing_tasks.MetadataWork.run', side_effect=lambda: lane('network')), \
+                patch('peach.library_processing._generate_previews', side_effect=lambda *a, **kw: lane('media')):
             thread = threading.Thread(target=lambda: results.append(self.run_selected(
                 ['metadata', 'previews'], execution_mode='parallel', job_id='pause-two', report=report)))
             thread.start()
             try:
-                self.assertTrue(media_entered.wait(3))
-                self.assertTrue(network_entered.wait(3))
+                ready.wait()
                 control_for(self.config).request('pause', 'pause-two')
                 advance.set()
-                self.assertTrue(paused.wait(3))
+                self.assertTrue(paused.wait(10), '双通道暂停应发布可恢复状态')
                 self.assertEqual(done, [])
             finally:
+                ready.abort()
                 control_for(self.config).request('resume', 'pause-two')
                 advance.set()
-                thread.join(5)
+                thread.join(10)
+        self.assertFalse(thread.is_alive())
         self.assertEqual(sorted(done), ['media', 'network'])
         self.assertEqual(results[0]['status'], 'complete', results)
 
